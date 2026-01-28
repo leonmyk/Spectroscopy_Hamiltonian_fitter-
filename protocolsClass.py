@@ -9,7 +9,7 @@ import corner
 from tqdm import tqdm
 from multiprocess import Pool
 
-
+from enum import Enum
 from unittest import case
 import emcee
 import corner
@@ -39,23 +39,28 @@ Ix = jmat(I, 'x')
 Iy = jmat(I, 'y')
 Iz = jmat(I, 'z')
 
-
+class State(Enum):
+    Ground = "ground"
+    Excited = "excited"
+    Full = "full"
 
 
 class Hamiltonian_Fitter():
 
-    def __init__(self, excited_meas, ground_meas, d_excited_meas, d_ground_meas, excited):
-        self.excited_meas = excited_meas
-        self.ground_meas = ground_meas
-        self.d_excited_meas = d_excited_meas
-        self.d_ground_meas = d_ground_meas
+    def __init__(self, meas, d_meas, state:State, meas_Aperp:float = None , simu_A:float = None):
+
+        self.state = state
+        self.meas = meas
+        self.d_meas = d_meas
         self.best_x = None
         self.median_x = None
         self.results = None
+        self.meas_Aperp = meas_Aperp
+        self.simu_A = simu_A
 
         
         # Lamb shift
-        rel_electron_freq = np.cumsum([0, *self.excited_meas]) # [kHz]
+        rel_electron_freq = np.cumsum([0, *self.meas]) # [kHz]
         g=5.24            # [kHz]
         kappa=700         # [kHz]
         self.lamb_shift_meas = rel_electron_freq * g**2 / (kappa**2/4 + rel_electron_freq**2) # [kHz]
@@ -96,71 +101,126 @@ class Hamiltonian_Fitter():
         excited_transitions = np.diff(e[10:] + self.lamb_shift_meas)
         return ground_transitions, excited_transitions
 
-    def get_log_likelihood_separated(self, hamiltonian: callable, excited: bool) -> callable:
+    def get_log_likelihood_separated(self,x, excited: bool) -> callable:
 
-        def log_likelihood_excited(x):
-            h: Qobj = hamiltonian(x)
-            _, excited_transitions = self.get_transitions_separated(h.eigenenergies())
-            residuals = (excited_transitions - self.excited_meas) / self.d_excited_meas
-            return -0.5 * np.sum(residuals**2)
 
-        def log_likelihood_ground(x):
-            h: Qobj = hamiltonian(x)
-            ground_transitions, _ = self.get_transitions_separated(h.eigenenergies())
-            residuals = (ground_transitions - self.ground_meas) / self.d_ground_meas
-            return -0.5 * np.sum(residuals**2)
+        if self.state == State.Excited :
+            h: Qobj = self.hamiltonian(x)
+            ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
+            residuals = (excited_transitions - self.meas) / self.d_meas
 
-        return log_likelihood_excited if excited else log_likelihood_ground
+        elif self.state == State.Ground :
+            h: Qobj = self.hamiltonian(x)
+            ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
+            residuals = (ground_transitions - self.meas) / self.d_meas
+        else :
+            h: Qobj = self.Full_hamiltonian(x)
+            ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
+            residuals = (np.concatenate((ground_transitions,excited_transitions - ground_transitions) - self.meas)) / self.d_meas
 
-    def plot_levels_and_residuals_separated(self, hamiltonian, x, title='', args={}):
-        h: Qobj = hamiltonian(x, **args)
-        ground_state, excited_state = self.get_transitions_separated(h.eigenenergies())
+        return -0.5 * np.sum(residuals**2)
 
-        fig, axs = plt.subplots(2, 2, figsize=(8, 6), tight_layout=True)
+    
+    def get_full_q_tensor(self, D, S1, S2, delta, theta):
+        cos1 = S1 * np.cos(theta)
+        sin1 = S1 * np.sin(theta)
+        cos2 = S2 * np.cos(2 * delta + 2 * theta)
+        sin2 = S2 * np.sin(2 * delta + 2 * theta)
+        q_tensor = np.array([
+            [ -D/2 + cos2,        sin2, cos1],
+            [        sin2, -D/2 - cos2, sin1],
+            [        cos1,        sin1,    D]
+        ])
+        return q_tensor
+
+    def zeeman_full_hamiltonian(self, Bz) -> Qobj:
+        return - Bz * (mu_Er * tensor(Sz, qeye(int(2*I+1))) + mu_Nb * tensor(qeye(2), Iz))
+
+    def hyperfine_hamiltonian(self,A) -> Qobj:
+        h = 0 # Hyperfine interaction 
+        for i, s_op in enumerate([Sx, Sy]):
+            for j, i_op in enumerate([Ix, Iy, Iz]):
+                h += self.simu_A[i, j] * tensor(s_op, i_op)
+        return A * tensor(Sz, Iz) + self.meas_Aperp * tensor(Sz, Ix) + h
+
+    def full_quadrupole_hamiltonian_param(self,D, S1, S2, delta, theta) -> Qobj:
+        q_tensor = self.get_full_q_tensor(D, S1, S2, delta, theta)
+        h = 0
+        for i, i1 in enumerate([Ix, Iy, Iz]):
+            for j, i2 in enumerate([Ix, Iy, Iz]):
+                h += q_tensor[i, j] * tensor(qeye(2), i1*i2)
+        return h
+
+    def sdq_hamiltonian_param(self,Dz) -> Qobj:    
+        q_tensor = self.get_full_q_tensor(self,Dz, 0,0,0,0)
+        h = 0
+        for i, i1 in enumerate([Ix, Iy, Iz]):
+            for j, i2 in enumerate([Ix, Iy, Iz]):
+                h += q_tensor[i, j] * tensor(Sz, i1*i2)
+        return h
+
+    def hexadecapole_hamiltonian(self,Hx) -> Qobj:
+        # Hexadecapole term is not implemented in this context, but can be added similarly
+        return Hx * tensor(Sz, Iz*Iz*Iz*Iz)
+
+    # Define the Hamiltonian
+    def Full_hamiltonian(self,x: np.ndarray) -> Qobj: 
+        Bz, A, D, S1, S2, delta, alpha, Dz = x
+        return self.zeeman_full_hamiltonian(self,Bz) +\
+            self.hyperfine_hamiltonian(self,A) +\
+            self.full_quadrupole_hamiltonian_param(self,D, S1, S2, delta, alpha) +\
+            self.sdq_hamiltonian_param(self,Dz) #+\
+            #hexadecapole_hamiltonian(Hx)
+
+    def plot_levels_and_residuals_separated(self, x, title='',args={}):
+
+        if self.state == State.Excited :
+            h: Qobj = self.hamiltonian(x)
+            ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
+            fit = excited_transitions 
+            error = (excited_transitions - self.meas)
+
+        elif self.state == State.Ground :
+            h: Qobj = self.hamiltonian(x)
+            ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
+            fit = ground_transitions
+            error = (ground_transitions - self.meas)
+        else :
+            h: Qobj = self.Full_hamiltonian(x)
+            ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
+            fit = np.concatenate((ground_transitions,excited_transitions - ground_transitions))
+            error = (np.concatenate((ground_transitions,excited_transitions - ground_transitions)) - self.meas)
+        
+        
+        fig, axs = plt.subplots(1, 2, figsize=(8, 6), tight_layout=True)
         plt.suptitle(title)
 
-        plt.sca(axs[0, 0])
-        plt.plot(self.excited_meas, 'o-', label='Measured')
-        plt.plot(excited_state, 'o-', label='fit')
+        plt.sca(axs[0])
+        plt.plot(self.meas, 'o-', label='Measured')
+        plt.plot(fit, 'o-', label='fit')
         plt.xlabel('Transition')
-        plt.ylabel(r'$f_{excited}$ [kHz]')
+        plt.ylabel(rf'$f_{self.state.value}$ [kHz]')
         plt.legend()
 
-        plt.sca(axs[0, 1])
+        plt.sca(axs[1])
         plt.errorbar(
-            range(len(excited_state)),
-            (self.excited_meas - excited_state) * 1e3,
-            yerr=self.d_excited_meas * 1e3
+            range(len(fit)),
+            (error) * 1e3,
+            yerr=self.d_meas * 1e3
         )
         plt.xlabel('Transition')
-        plt.ylabel(r'res$( f_{excited})$ [Hz]')
-
-        plt.sca(axs[1, 0])
-        plt.plot(self.ground_meas, 'o-', label='Measured')
-        plt.plot(ground_state, 'o-', label='fit')
-        plt.legend()
-        plt.xlabel('Transition')
-        plt.ylabel(r'$f_{ground}$ [kHz]')
-
-        plt.sca(axs[1, 1])
-        plt.errorbar(
-            range(len(self.ground_meas)),
-            (self.ground_meas - ground_state) * 1e3,
-            yerr=self.d_ground_meas * 1e3
-        )
-        plt.xlabel('Transition')
-        plt.ylabel(r'res$( f_{ground}) $ [Hz]')
+        plt.ylabel(rf'res$( f_{self.state.value})$ [Hz]')
 
         plt.show()
 
-    def run_MCMC(self, guess, excited, nwalkers=64, nsteps=10000):
+    def run_MCMC(self, guess, excited, nwalkers=64, nsteps=10000, var = 0.01):
 
         hamiltonian = self.hamiltonian
         log_likelihood = self.get_log_likelihood_separated(
             hamiltonian, excited=excited
         )
 
-        pos = guess * (1 + 0.01 * np.random.randn(nwalkers, len(guess)))
+        pos = guess * (1 +  var * np.random.randn(nwalkers, len(guess)))
 
         with Pool() as pool:
             sampler = emcee.EnsembleSampler(nwalkers, len(guess), log_likelihood, pool=pool)
@@ -182,13 +242,13 @@ class Hamiltonian_Fitter():
 
     def Plot_Best(self):
         self.plot_levels_and_residuals_separated(
-            self.hamiltonian, self.best_x,
+            self.best_x,
             title='Best X errors'
         )
     
     def Plot_Guess(self,guess):
         self.plot_levels_and_residuals_separated(
-            self.hamiltonian, guess,
+            guess,
             title='Best X errors'
         )
 
