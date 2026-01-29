@@ -174,6 +174,46 @@ class Hamiltonian_Fitter():
             self.sdq_hamiltonian_param(Dz) #+\
             #hexadecapole_hamiltonian(Hx)
 
+    def Plot_full(self, x, title='Full Fit'):
+
+        h: Qobj = self.Full_hamiltonian(x)
+        ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
+        fit = np.concatenate((ground_transitions,excited_transitions))
+        error = (np.concatenate((ground_transitions,excited_transitions - ground_transitions)) - self.meas)
+        meas_to_plot = self.meas + np.concatenate((np.zeros(len(ground_transitions)),ground_transitions))
+        
+        fig, axs = plt.subplots(3, 1, figsize=(8, 6), tight_layout=True,sharex=True)
+        plt.suptitle(title)
+        plt.sca(axs[0])
+        plt.plot(meas_to_plot[:9], 'o', marker = 'v', label= r"$\omega^{\downarrow}_{{n(n+1)}/2\pi}$", color = 'orange')
+        plt.plot(meas_to_plot[9:], 'o', marker = '^', label= r"$\omega^{\uparrow}_{{n(n+1)}/2\pi}$", color = 'blue')
+        # plt.plot(fit, 'o-', label='fit')
+        plt.xlabel('Transition')
+        plt.ylabel(rf'$f_{self.state.value}$ [kHz]')
+        plt.legend()
+
+        plt.sca(axs[1])
+        plt.errorbar(
+            range(len(fit[:9])),
+            (error[:9]) * 1e3,fmt = 'o',
+            yerr=self.d_meas[:9] * 1e3,
+            marker = 'v', color = 'orange'
+        )
+        plt.ylabel(r'$residual_{{\downarrow}} [Hz]$')
+
+        plt.sca(axs[2])
+        plt.errorbar(
+            range(len(fit[:9])),
+            (error[9:]) * 1e3,fmt = 'o',
+            yerr=self.d_meas[9:] * 1e3,
+            marker = '^', color = 'blue'
+        )
+        plt.xlabel('Transition')
+        plt.ylabel(r'$residual_{{\uparrow}} [Hz]$')
+
+        
+        plt.show()
+        
     def plot_levels_and_residuals_separated(self, x, title='',args={}):
 
         if self.state == State.Excited :
