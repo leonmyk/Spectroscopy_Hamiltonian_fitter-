@@ -196,7 +196,7 @@ class Hamiltonian_Fitter():
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             fit = np.concatenate((ground_transitions,excited_transitions))
             error = (np.concatenate((ground_transitions,excited_transitions - ground_transitions)) - self.meas)
-            meas_to_plot = self.meas + ground_transitions
+            meas_to_plot = self.meas + np.concatenate((np.zeros(len(ground_transitions)),ground_transitions))
 
         
         
