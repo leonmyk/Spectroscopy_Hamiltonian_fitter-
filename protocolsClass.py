@@ -44,6 +44,8 @@ class State(Enum):
     Excited = "excited"
     Full = "full"
 
+manu_ramsey_meas = np.array([-134296, -133678, -132898, -131896, -130532, -128697, -125952, -124533, -88889]) * 1e-3 # [kHz]
+
 
 class Hamiltonian_Fitter():
 
@@ -60,7 +62,7 @@ class Hamiltonian_Fitter():
 
         
         # Lamb shift
-        rel_electron_freq = np.cumsum([0, *self.meas]) # [kHz]
+        rel_electron_freq = np.cumsum([0, *manu_ramsey_meas]) # [kHz]
         g=5.24            # [kHz]
         kappa=700         # [kHz]
         self.lamb_shift_meas = rel_electron_freq * g**2 / (kappa**2/4 + rel_electron_freq**2) # [kHz]
@@ -101,7 +103,7 @@ class Hamiltonian_Fitter():
         excited_transitions = np.diff(e[10:] + self.lamb_shift_meas)
         return ground_transitions, excited_transitions
 
-    def get_log_likelihood_separated(self,x, excited: bool) -> callable:
+    def get_log_likelihood_separated(self,x):
 
 
         if self.state == State.Excited :
@@ -116,7 +118,7 @@ class Hamiltonian_Fitter():
         else :
             h: Qobj = self.Full_hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
-            residuals = (np.concatenate((ground_transitions,excited_transitions - ground_transitions) - self.meas)) / self.d_meas
+            residuals = (np.concatenate((ground_transitions,excited_transitions - ground_transitions)) - self.meas) / self.d_meas
 
         return -0.5 * np.sum(residuals**2)
 
@@ -152,7 +154,7 @@ class Hamiltonian_Fitter():
         return h
 
     def sdq_hamiltonian_param(self,Dz) -> Qobj:    
-        q_tensor = self.get_full_q_tensor(self,Dz, 0,0,0,0)
+        q_tensor = self.get_full_q_tensor(Dz, 0,0,0,0)
         h = 0
         for i, i1 in enumerate([Ix, Iy, Iz]):
             for j, i2 in enumerate([Ix, Iy, Iz]):
@@ -166,10 +168,10 @@ class Hamiltonian_Fitter():
     # Define the Hamiltonian
     def Full_hamiltonian(self,x: np.ndarray) -> Qobj: 
         Bz, A, D, S1, S2, delta, alpha, Dz = x
-        return self.zeeman_full_hamiltonian(self,Bz) +\
-            self.hyperfine_hamiltonian(self,A) +\
-            self.full_quadrupole_hamiltonian_param(self,D, S1, S2, delta, alpha) +\
-            self.sdq_hamiltonian_param(self,Dz) #+\
+        return self.zeeman_full_hamiltonian(Bz) +\
+            self.hyperfine_hamiltonian(A) +\
+            self.full_quadrupole_hamiltonian_param(D, S1, S2, delta, alpha) +\
+            self.sdq_hamiltonian_param(Dz) #+\
             #hexadecapole_hamiltonian(Hx)
 
     def plot_levels_and_residuals_separated(self, x, title='',args={}):
@@ -179,24 +181,30 @@ class Hamiltonian_Fitter():
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             fit = excited_transitions 
             error = (excited_transitions - self.meas)
+            meas_to_plot = self.meas
+
 
         elif self.state == State.Ground :
             h: Qobj = self.hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             fit = ground_transitions
             error = (ground_transitions - self.meas)
+            meas_to_plot = self.meas
+
         else :
             h: Qobj = self.Full_hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
-            fit = np.concatenate((ground_transitions,excited_transitions - ground_transitions))
+            fit = np.concatenate((ground_transitions,excited_transitions))
             error = (np.concatenate((ground_transitions,excited_transitions - ground_transitions)) - self.meas)
+            meas_to_plot = self.meas + ground_transitions
+
         
         
         fig, axs = plt.subplots(1, 2, figsize=(8, 6), tight_layout=True)
         plt.suptitle(title)
 
         plt.sca(axs[0])
-        plt.plot(self.meas, 'o-', label='Measured')
+        plt.plot(meas_to_plot, 'o-', label='Measured')
         plt.plot(fit, 'o-', label='fit')
         plt.xlabel('Transition')
         plt.ylabel(rf'$f_{self.state.value}$ [kHz]')
@@ -213,12 +221,12 @@ class Hamiltonian_Fitter():
 
         plt.show()
 
-    def run_MCMC(self, guess, excited, nwalkers=64, nsteps=10000, var = 0.01):
+    def run_MCMC(self, guess,nwalkers=64, nsteps=10000, var = 0.01):
 
-        hamiltonian = self.hamiltonian
-        log_likelihood = self.get_log_likelihood_separated(
-            hamiltonian, excited=excited
-        )
+        if self.state == State.Full :
+            log_likelihood = self.get_log_likelihood_separated  
+        else :
+            log_likelihood = self.get_log_likelihood_separated
 
         pos = guess * (1 +  var * np.random.randn(nwalkers, len(guess)))
 
@@ -232,12 +240,14 @@ class Hamiltonian_Fitter():
         self.median_x = np.median(samples, axis=0)
         self.results = samples
 
-        self.plot_levels_and_residuals_separated(
-            self.hamiltonian, self.median_x,
-            title='Median X errors'
-        )
         print("median x : ",self.median_x)
         print("best x : ",self.best_x)
+
+        self.plot_levels_and_residuals_separated(
+            self.median_x,
+            title='Median X errors'
+        )
+
         return sampler
 
     def Plot_Best(self):
@@ -253,7 +263,10 @@ class Hamiltonian_Fitter():
         )
 
     def Plot_corner(self):
-        labels = ["Bz", "D", "E", "Q", "delta"]
+        if self.state == State.Full:
+            labels = ["Bz", "A", "D", "S1", "S2", "delta", "alpha", "Dz"]
+        else :
+            labels = ["Bz", "D", "E", "Q", "delta"]
         fig = corner.corner(self.results, labels=labels, truths=self.median_x)
         plt.show()
 
