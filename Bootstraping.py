@@ -19,7 +19,9 @@ from functions import load_h5_to_dic
 from functions import complex_ramsey_fit
 
 dirpath = 'Z:/SPIN-001/Run2 [BFp4]/RamanManuRamsey9o2_interleaved/'
-filename = '20260126173853__RamanManuRamsey9o2_interleaved.hdf5'
+# dirpath = 'Z:/SPIN-001/Run2 [BFp4]/RamanRamsey9o2_interleaved/'
+filename = '20260126173853__RamanManuRamsey9o2_interleaved.hdf5' 
+# filename = '20260119184019__RamanRamsey9o2_interleaved.hdf5'
 signal = load_h5_to_dic(dirpath + filename)[0]
 
 def plot(
@@ -56,7 +58,7 @@ def plot(
     # complex_ramsey_fit(t,f,T,phi,A,B)
     guess = [
         freqmax, # Frequency in Hz
-        2,  # Decay time constant T [ms]
+        5,  # Decay time constant T [ms]
         -1* np.pi,
         (np.max(data_I) - np.min(data_I)) / 2,  # Amplitude
         (np.average(data_I) + np.average(data_Q)) / 2,  # offset
@@ -221,14 +223,15 @@ for transition in range(end_transition):
 
 
     start_time=10000
-    end_tim=3_010_000
+    end_time=3_010_000
     n_steps=41
 
-    ramsey_times = np.linspace(start_time,end_tim,n_steps)*1e-6  # Convert to ms
+    # start_time = 10000
+    # end_time = 1000000000
+    # n_steps = 41
 
-
-
-    f1_fits[transition], stds[transition] = plot(data_click, N_RO, 1, threshold, transition, ramsey_times, plot_guess=False,plot = False, nuclear_detuning=nuclear_detuning, artificial_detuning=artificial_detuning, drive_freq=nuclear_frequency[transition])
+    ramsey_times = np.linspace(start_time,end_time,n_steps)*1e-6  # Convert to ms
+    f1_fits[transition], stds[transition] = plot(data_click, N_RO, 1, threshold, transition, ramsey_times, plot_guess=False,plot = True, nuclear_detuning=nuclear_detuning, artificial_detuning=artificial_detuning, drive_freq=nuclear_frequency[transition])
 
 
 print("Fitted frequencies (kHz):", f1_fits)
