@@ -20,8 +20,8 @@ ground_meas = np.array([7512786.3, 6847127.7, 6180056.7, 5510661.7, 4837199., 41
 manu_ramsey_meas = np.array([-134296, -133678, -132898, -131896, -130532, -128697, -125952, -124533, -88889]) * 1e-3 # [kHz]
 full_meas = np.concatenate((ground_meas,manu_ramsey_meas))
 
-d_ground_meas = np.array([1,1,1,1,1,1,1,1,1]) * 1e-3 # [kHz]
-d_manu_ramsey_meas = np.array([1,1,1,1,1,1,1,1,1]) * 20e-3 # [kHz]
+d_ground_meas = np.array([0.00014954, 0.00014637, 0.00017545, 0.00015029, 0.00012487, 0.00017868, 0.00013939, 0.00012705, 0.00021763])# [kHz]
+d_manu_ramsey_meas = np.array([0.03552449, 0.03082249, 0.02343234, 0.02998403, 0.0356164,  0.01894326, 0.02569785, 0.02447841, 0.02423604])# [kHz]
 d_full_meas = np.concatenate((d_ground_meas,d_manu_ramsey_meas))
 
 A_perp_meas = 105 # [kHz] | Measured through the Raman Rabi experiment
@@ -51,4 +51,4 @@ best_x =  [ 4.49821745e+02,  1.29897714e+02 ,-2.37052323e+02, -1.19458723e+01, -
 median_x =  [ 4.49821749e+02,  1.29897911e+02, -2.37052291e+02, -1.19454405e+01, -1.49320418e+02,  1.57449384e+00, -8.21746234e-01,  7.89184735e-02]
 
 
-fitter_full.Plot_full(best_x)
+fitter_full.Plot_Quadropole()

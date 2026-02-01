@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 from scipy.optimize import minimize, differential_evolution, basinhopping
 from IPython.display import display, Math
 from scipy.stats import chi2
+import json
 
 # Constants
 mu_Nb = 10.4213  # [kHz / mT]
@@ -54,9 +55,9 @@ class Hamiltonian_Fitter():
         self.state = state
         self.meas = meas
         self.d_meas = d_meas
-        self.best_x = None
-        self.median_x = None
-        self.results = None
+        self.best_x = {}
+        self.median_x = {}
+        self.results = {}
         self.meas_Aperp = meas_Aperp
         self.simu_A = simu_A
 
@@ -66,6 +67,9 @@ class Hamiltonian_Fitter():
         g=5.24            # [kHz]
         kappa=700         # [kHz]
         self.lamb_shift_meas = rel_electron_freq * g**2 / (kappa**2/4 + rel_electron_freq**2) # [kHz]
+
+
+        self.Load_results()
 
     def get_q_tensor(self, D, E, Q, delta):
         c = E * np.cos(2 * delta)
@@ -174,6 +178,65 @@ class Hamiltonian_Fitter():
             self.sdq_hamiltonian_param(Dz) #+\
             #hexadecapole_hamiltonian(Hx)
 
+
+    def Plot_Quadropole(self):
+
+        fig,axs = plt.subplots(1,3, figsize=(8,6), tight_layout=True)
+        plt.suptitle('Quadropole Tensor Elements Distribution')
+        QXX = {}
+        QYY = {}
+        QZZ = {}
+
+        for state in State:
+
+            QXX[state.value] = []
+            QYY[state.value] = []
+            QZZ[state.value] = []
+
+            for res in self.results[state.value]:
+
+                if state == State.Full :
+                    q_gr_f = self.get_full_q_tensor(res[2] - res[7]/2, res[3], res[4], res[5], res[6])
+                    q_ex_f = self.get_full_q_tensor(res[2] + res[7]/2, res[3], res[4], res[5], res[6])
+                    vals_gr_f, vals_ex_f = np.linalg.eigvals(q_gr_f), np.linalg.eigvals(q_ex_f)
+                    Qx_gr,Qy_gr,Qz_gr = np.sort(vals_gr_f)
+                    Qx_ex,Qy_ex,Qz_ex = np.sort(vals_ex_f)
+                    QXX[state.value].append((Qx_gr, Qx_ex))
+                    QYY[state.value].append((Qy_gr, Qy_ex))
+                    QZZ[state.value].append((Qz_gr, Qz_ex))
+
+                else :
+                    D, E, Q, delta = res[1], res[2], res[3], res[4]
+                    q_tensor = self.get_q_tensor(D, E, Q, delta)
+                    Qx,Qy,Qz = np.linalg.eigvalsh(q_tensor)
+
+                    QXX[state.value].append(Qx)
+                    QYY[state.value].append(Qy)
+                    QZZ[state.value].append(Qz)
+
+
+
+        axs[0].hist(QXX[State.Ground.value]-np.mean(QXX[State.Ground.value]), bins=20, alpha=0.5, label='Ground')
+        axs[0].hist(QXX[State.Excited.value]-np.mean(QXX[State.Excited.value]), bins=20, alpha=0.5, label='Excited')
+        # axs[0].set_xlim(right=1,left=-1)
+
+        axs[1].hist(QYY[State.Ground.value]-np.mean(QYY[State.Ground.value]), bins=20, alpha=0.5, label='Ground')
+        axs[1].hist(QYY[State.Excited.value]-np.mean(QYY[State.Excited.value]), bins=20, alpha=0.5, label='Excited')
+        # axs[1].set_xlim(right=1,left=-1)
+
+        axs[2].hist(QZZ[State.Ground.value]-np.mean(QZZ[State.Ground.value]), bins=20, alpha=0.5, label='Ground')
+        axs[2].hist(QZZ[State.Excited.value]-np.mean(QZZ[State.Excited.value]), bins=20, alpha=0.5, label='Excited')
+        # axs[2].set_xlim(right=1,left=-1)
+
+        axs[0].legend()
+        axs[1].legend()
+        axs[2].legend()
+
+        print("QYY[State.Excited.value]:", QYY[State.Excited.value])
+
+        plt.show()
+
+
     def Plot_full(self, x, title='Full Fit'):
 
         h: Qobj = self.Full_hamiltonian(x)
@@ -276,23 +339,66 @@ class Hamiltonian_Fitter():
 
         samples = sampler.get_chain(discard=500, flat=True)
         idx = sampler.get_log_prob()[500:].argmax()
-        self.best_x = samples[idx]
-        self.median_x = np.median(samples, axis=0)
-        self.results = samples
 
-        print("median x : ",self.median_x)
-        print("best x : ",self.best_x)
+        self.best_x[self.state.value] = samples[idx]
+        self.median_x[self.state.value][self.state.value] = np.median(samples, axis=0)
+        self.results[self.state.value] = samples
+
+        print("median x : ",self.median_x[self.state.value])
+        print("best x : ",self.best_x[self.state.value])
 
         self.plot_levels_and_residuals_separated(
-            self.median_x,
+            self.median_x[self.state.value],
             title='Median X errors'
         )
 
         return sampler
 
+    def Save_results(self):
+        
+        filename = f'mcmc_results_{self.state.value}.json'
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump({
+                "best_x": self.best_x[self.state.value].tolist(),
+                "median_x": self.median_x[self.state.value].tolist(),
+                "results": self.results[self.state.value].tolist()
+            }   , f, indent=4, ensure_ascii=False)
+
+    def Load_results(self):
+
+        filename = f'mcmc_results_{State.Ground.value}.json'
+        try:
+            with open(filename, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                self.best_x[State.Ground.value] = np.array(data["best_x"])
+                self.median_x[State.Ground.value] = np.array(data["median_x"])
+                self.results[State.Ground.value] = np.array(data["results"])
+        except FileNotFoundError:
+            print(f"File {filename} not found. Skipping loading ground state results.")
+        
+        filename = f'mcmc_results_{State.Excited.value}.json'
+        try:
+            with open(filename, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                self.best_x[State.Excited.value] = np.array(data["best_x"])
+            self.median_x[State.Excited.value] = np.array(data["median_x"])
+            self.results[State.Excited.value] = np.array(data["results"])
+        except FileNotFoundError:
+            print(f"File {filename} not found. Skipping loading excited state results.")
+
+        filename = f'mcmc_results_{State.Full.value}.json'
+        try:
+            with open(filename, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                self.best_x[State.Full.value] = np.array(data["best_x"])
+                self.median_x[State.Full.value] = np.array(data["median_x"])
+            self.results[State.Full.value] = np.array(data["results"])
+        except FileNotFoundError:
+            print(f"File {filename} not found. Skipping loading full state results.")
+
     def Plot_Best(self):
         self.plot_levels_and_residuals_separated(
-            self.best_x,
+            self.best_x[self.state.value],
             title='Best X errors'
         )
     
@@ -307,7 +413,7 @@ class Hamiltonian_Fitter():
             labels = ["Bz", "A", "D", "S1", "S2", "delta", "alpha", "Dz"]
         else :
             labels = ["Bz", "D", "E", "Q", "delta"]
-        fig = corner.corner(self.results, labels=labels, truths=self.median_x)
+        fig = corner.corner(self.results[self.state.value], labels=labels, truths=self.median_x[self.state.value])
         plt.show()
 
 
