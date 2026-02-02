@@ -69,7 +69,7 @@ class Hamiltonian_Fitter():
         self.lamb_shift_meas = rel_electron_freq * g**2 / (kappa**2/4 + rel_electron_freq**2) # [kHz]
 
 
-        self.Load_results()
+        # self.Load_results()
 
     def get_q_tensor(self, D, E, Q, delta):
         c = E * np.cos(2 * delta)
@@ -341,7 +341,7 @@ class Hamiltonian_Fitter():
         idx = sampler.get_log_prob()[500:].argmax()
 
         self.best_x[self.state.value] = samples[idx]
-        self.median_x[self.state.value][self.state.value] = np.median(samples, axis=0)
+        self.median_x[self.state.value] = np.median(samples, axis=0)
         self.results[self.state.value] = samples
 
         print("median x : ",self.median_x[self.state.value])
