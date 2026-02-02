@@ -50,7 +50,7 @@ manu_ramsey_meas = np.array([-134296, -133678, -132898, -131896, -130532, -12869
 
 class Hamiltonian_Fitter():
 
-    def __init__(self, meas, d_meas, state:State, meas_Aperp:float = None , simu_A:float = None):
+    def __init__(self, meas, d_meas, state:State,id:str = '00', meas_Aperp:float = None , simu_A:float = None):
 
         self.state = state
         self.meas = meas
@@ -60,6 +60,7 @@ class Hamiltonian_Fitter():
         self.results = {}
         self.meas_Aperp = meas_Aperp
         self.simu_A = simu_A
+        self.id = id
 
         
         # Lamb shift
@@ -96,11 +97,34 @@ class Hamiltonian_Fitter():
         return h
 
     def hamiltonian(self, x: np.ndarray) -> Qobj:
-        Bz, D, E, Q2, Q3 = x
+        Bz, D, E, Q, delta = x
         return (
             self.zeeman_hamiltonian(Bz) +
-            self.quadrupole_hamiltonian_param(D, E, Q2, Q3)
+            self.quadrupole_hamiltonian_param(D, E, Q, delta)
         )
+        
+    def log_prior_full(self,x):
+        Bz, A, D, S1, S2, delta, alpha, Dz = x
+
+        # -------- hard bounds (algebraic) --------------------------------
+        if S1 <= 0.0 or S2 <= 0.0:          # S1 and S2 must be positive
+            return -np.inf
+        
+        # delta and alpha must be in (-π/2, π/2]
+        if not (0 < delta <= np.pi/2 and 0 < alpha <= np.pi/2):
+            return -np.inf
+        
+        return 0.0
+
+    def log_prior(self,x):
+        Bz, D, E, Q, delta = x
+
+        # -------- hard bounds (algebraic) --------------------------------
+        if Q <= 0.0 or not (-0.5 < delta <= 3):          # Q and E must be positive
+            return -np.inf
+
+        
+        return 0.0
 
     def get_transitions_separated(self, e):
         ground_transitions = np.diff(e[:10])
@@ -113,18 +137,20 @@ class Hamiltonian_Fitter():
         if self.state == State.Excited :
             h: Qobj = self.hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
-            residuals = (excited_transitions - self.meas) / self.d_meas
+            residuals = (excited_transitions - self.meas) / self.d_meas + self.log_prior(x)
 
         elif self.state == State.Ground :
             h: Qobj = self.hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
-            residuals = (ground_transitions - self.meas) / self.d_meas
+            residuals = (ground_transitions - self.meas) / self.d_meas + self.log_prior(x)
         else :
             h: Qobj = self.Full_hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
-            residuals = (np.concatenate((ground_transitions,excited_transitions - ground_transitions)) - self.meas) / self.d_meas
+            meas_to_compare = np.concatenate((self.meas[:9],self.meas[9:] + self.meas[:9]))
+            residuals = (np.concatenate((ground_transitions,excited_transitions)) - meas_to_compare) / self.d_meas
 
-        return -0.5 * np.sum(residuals**2)
+        residuals_sum = -0.5 * np.sum(residuals**2)+ self.log_prior_full(x) if self.state == State.Full else -0.5 * np.sum(residuals**2)+ self.log_prior(x)
+        return residuals_sum
 
     
     def get_full_q_tensor(self, D, S1, S2, delta, theta):
@@ -215,17 +241,22 @@ class Hamiltonian_Fitter():
                     QZZ[state.value].append(Qz)
 
 
-
+        axs[0].hist(QXX[State.Excited.value]-np.mean(QXX[State.Ground.value]), bins=20, alpha=0.5, label='Excited')
         axs[0].hist(QXX[State.Ground.value]-np.mean(QXX[State.Ground.value]), bins=20, alpha=0.5, label='Ground')
-        axs[0].hist(QXX[State.Excited.value]-np.mean(QXX[State.Excited.value]), bins=20, alpha=0.5, label='Excited')
+        axs[0].set_xlabel(r'$Q_{XX}$')
+        axs[0].set_title(f'{np.mean(QXX[State.Ground.value])}')
         # axs[0].set_xlim(right=1,left=-1)
 
+        axs[1].hist(QYY[State.Excited.value]-np.mean(QYY[State.Ground.value]), bins=20, alpha=0.5, label='Excited')
         axs[1].hist(QYY[State.Ground.value]-np.mean(QYY[State.Ground.value]), bins=20, alpha=0.5, label='Ground')
-        axs[1].hist(QYY[State.Excited.value]-np.mean(QYY[State.Excited.value]), bins=20, alpha=0.5, label='Excited')
+        axs[1].set_xlabel(r'$Q_{YY}$')
+        axs[1].set_title(f'{np.mean(QYY[State.Ground.value])}')
         # axs[1].set_xlim(right=1,left=-1)
 
+        axs[2].hist(QZZ[State.Excited.value]-np.mean(QZZ[State.Ground.value]), bins=20, alpha=0.5, label='Excited')
         axs[2].hist(QZZ[State.Ground.value]-np.mean(QZZ[State.Ground.value]), bins=20, alpha=0.5, label='Ground')
-        axs[2].hist(QZZ[State.Excited.value]-np.mean(QZZ[State.Excited.value]), bins=20, alpha=0.5, label='Excited')
+        axs[2].set_xlabel(r'$Q_{ZZ}$')
+        axs[2].set_title(f'{np.mean(QZZ[State.Ground.value])}')
         # axs[2].set_xlim(right=1,left=-1)
 
         axs[0].legend()
@@ -307,8 +338,8 @@ class Hamiltonian_Fitter():
         plt.suptitle(title)
 
         plt.sca(axs[0])
-        plt.plot(meas_to_plot, 'o-', label='Measured')
-        plt.plot(fit, 'o-', label='fit')
+        plt.plot(meas_to_plot, 'o', label='Measured')
+        plt.plot(fit, 'o', label='fit')
         plt.xlabel('Transition')
         plt.ylabel(rf'$f_{self.state.value}$ [kHz]')
         plt.legend()
@@ -356,7 +387,7 @@ class Hamiltonian_Fitter():
 
     def Save_results(self):
         
-        filename = f'mcmc_results_{self.state.value}.json'
+        filename = f'mcmc_results_{self.state.value}' + self.id + '.json'
         with open(filename, "w", encoding="utf-8") as f:
             json.dump({
                 "best_x": self.best_x[self.state.value].tolist(),
@@ -366,7 +397,7 @@ class Hamiltonian_Fitter():
 
     def Load_results(self):
 
-        filename = f'mcmc_results_{State.Ground.value}.json'
+        filename = f'mcmc_results_{State.Ground.value}' + self.id + '.json'
         try:
             with open(filename, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -376,7 +407,7 @@ class Hamiltonian_Fitter():
         except FileNotFoundError:
             print(f"File {filename} not found. Skipping loading ground state results.")
         
-        filename = f'mcmc_results_{State.Excited.value}.json'
+        filename = f'mcmc_results_{State.Excited.value}' + self.id + '.json'
         try:
             with open(filename, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -386,7 +417,7 @@ class Hamiltonian_Fitter():
         except FileNotFoundError:
             print(f"File {filename} not found. Skipping loading excited state results.")
 
-        filename = f'mcmc_results_{State.Full.value}.json'
+        filename = f'mcmc_results_{State.Full.value}' + self.id + '.json'
         try:
             with open(filename, "r", encoding="utf-8") as f:
                 data = json.load(f)
