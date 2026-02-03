@@ -59,8 +59,16 @@ def main():
     median_x =  [ 4.49821749e+02,  1.29897911e+02, -2.37052291e+02, -1.19454405e+01, -1.49320418e+02,  1.57449384e+00, -8.21746234e-01,  7.89184735e-02]
 
 
-    fitter_full.run_MCMC(guess_full,64,3000)
-
+    fitter_full.Load_results()
+    fitter_full.Plot_Quadropole()
+    print(np.std(fitter_full.results['ground'][:,3]))
+    print(np.std(fitter_full.results['excited'][:,3]))
+    
+    print(np.min(fitter_full.results['ground'][:,3])-np.max(fitter_full.results['ground'][:,3]))
+    print(np.min(fitter_full.results['excited'][:,3])-np.max(fitter_full.results['excited'][:,3]))
+    
+    print(np.mean(fitter_full.results['ground'][:,3]))
+    print(np.mean(fitter_full.results['excited'][:,3]))
 
 if __name__ == "__main__":
     # not strictly required unless you freeze into an .exe, but harmless:

@@ -24,6 +24,11 @@ from IPython.display import display, Math
 from scipy.stats import chi2
 import json
 
+from functions import Full_hamiltonian
+from functions import hamiltonian
+from functions import hamiltonian_Heca
+from functions import get_q_tensor
+
 # Constants
 mu_Nb = 10.4213  # [kHz / mT]
 mu_Er = - 17_350 # [kHz / mT]
@@ -44,6 +49,7 @@ class State(Enum):
     Ground = "ground"
     Excited = "excited"
     Full = "full"
+    Heca = "heca"
 
 manu_ramsey_meas = np.array([-134296, -133678, -132898, -131896, -130532, -128697, -125952, -124533, -88889]) * 1e-3 # [kHz]
 
@@ -70,49 +76,16 @@ class Hamiltonian_Fitter():
         self.lamb_shift_meas = rel_electron_freq * g**2 / (kappa**2/4 + rel_electron_freq**2) # [kHz]
 
 
-        # self.Load_results()
-
-    def get_q_tensor(self, D, E, Q, delta):
-        c = E * np.cos(2 * delta)
-        s = E * np.sin(2 * delta)
-        q_tensor = np.array([
-            [-D/2 + c,  s, Q],
-            [s, -D/2 - c, 0],
-            [Q, 0, D]
-        ])
-        return q_tensor
-
-    def zeeman_hamiltonian(self, Bz) -> Qobj:
-        return -Bz * (
-            mu_Er * tensor(Sz, qeye(int(2*I+1))) +
-            mu_Nb * tensor(qeye(2), Iz)
-        )
-
-    def quadrupole_hamiltonian_param(self, D, E, Q, delta) -> Qobj:
-        q_tensor = self.get_q_tensor(D, E, Q, delta)
-        h = 0
-        for i, i1 in enumerate([Ix, Iy, Iz]):
-            for j, i2 in enumerate([Ix, Iy, Iz]):
-                h += q_tensor[i, j] * tensor(qeye(2), i1 * i2)
-        return h
-
-    def hamiltonian(self, x: np.ndarray) -> Qobj:
-        Bz, D, E, Q, delta = x
-        return (
-            self.zeeman_hamiltonian(Bz) +
-            self.quadrupole_hamiltonian_param(D, E, Q, delta)
-        )
-        
     def log_prior_full(self,x):
         Bz, A, D, S1, S2, delta, alpha, Dz = x
 
-        # -------- hard bounds (algebraic) --------------------------------
-        if S1 <= 0.0 or S2 <= 0.0:          # S1 and S2 must be positive
-            return -np.inf
+        # # -------- hard bounds (algebraic) --------------------------------
+        # if S1 <= 0.0 or S2 <= 0.0:          # S1 and S2 must be positive
+        #     return -np.inf
         
         # delta and alpha must be in (-π/2, π/2]
-        if not (0 < delta <= np.pi/2 and 0 < alpha <= np.pi/2):
-            return -np.inf
+        # if not (-np.pi/2 < delta <= np.pi/2 and -np.pi/2 < alpha <= np.pi/2):
+        #     return -np.inf
         
         return 0.0
 
@@ -135,24 +108,45 @@ class Hamiltonian_Fitter():
 
 
         if self.state == State.Excited :
-            h: Qobj = self.hamiltonian(x)
+            h: Qobj = hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             residuals = (excited_transitions - self.meas) / self.d_meas + self.log_prior(x)
 
         elif self.state == State.Ground :
-            h: Qobj = self.hamiltonian(x)
+            h: Qobj = hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             residuals = (ground_transitions - self.meas) / self.d_meas + self.log_prior(x)
-        else :
-            h: Qobj = self.Full_hamiltonian(x)
+            
+        elif self.state == State.Full :
+            h: Qobj = Full_hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             meas_to_compare = np.concatenate((self.meas[:9],self.meas[9:] + self.meas[:9]))
             residuals = (np.concatenate((ground_transitions,excited_transitions)) - meas_to_compare) / self.d_meas
 
+        elif self.state == State.Heca :
+            h: Qobj = hamiltonian_Heca(x)
+            ground_transitions, _ = self.get_transitions_separated(h.eigenenergies())
+            jaime_energies = np.dif(ground_transitions)
+            meas_to_compare = np.concatenate((self.meas[:9],self.meas[9:] + self.meas[:9]))
+            residuals = (jaime_energies- self.meas) / self.d_meas
+        
+
         residuals_sum = -0.5 * np.sum(residuals**2)+ self.log_prior_full(x) if self.state == State.Full else -0.5 * np.sum(residuals**2)+ self.log_prior(x)
         return residuals_sum
 
-    
+    def Get_deriv(self,BZ_vals,guess = None):
+        if guess == None:
+            guess = self.best_x['ground']
+            
+        n_points = 300
+        x_list = np.array([np.copy(guess)] for i in range(n_points))
+        
+        
+        
+        
+        
+        
+        
     def get_full_q_tensor(self, D, S1, S2, delta, theta):
         cos1 = S1 * np.cos(theta)
         sin1 = S1 * np.sin(theta)
@@ -165,46 +159,6 @@ class Hamiltonian_Fitter():
         ])
         return q_tensor
 
-    def zeeman_full_hamiltonian(self, Bz) -> Qobj:
-        return - Bz * (mu_Er * tensor(Sz, qeye(int(2*I+1))) + mu_Nb * tensor(qeye(2), Iz))
-
-    def hyperfine_hamiltonian(self,A) -> Qobj:
-        h = 0 # Hyperfine interaction 
-        for i, s_op in enumerate([Sx, Sy]):
-            for j, i_op in enumerate([Ix, Iy, Iz]):
-                h += self.simu_A[i, j] * tensor(s_op, i_op)
-        return A * tensor(Sz, Iz) + self.meas_Aperp * tensor(Sz, Ix) + h
-
-    def full_quadrupole_hamiltonian_param(self,D, S1, S2, delta, theta) -> Qobj:
-        q_tensor = self.get_full_q_tensor(D, S1, S2, delta, theta)
-        h = 0
-        for i, i1 in enumerate([Ix, Iy, Iz]):
-            for j, i2 in enumerate([Ix, Iy, Iz]):
-                h += q_tensor[i, j] * tensor(qeye(2), i1*i2)
-        return h
-
-    def sdq_hamiltonian_param(self,Dz) -> Qobj:    
-        q_tensor = self.get_full_q_tensor(Dz, 0,0,0,0)
-        h = 0
-        for i, i1 in enumerate([Ix, Iy, Iz]):
-            for j, i2 in enumerate([Ix, Iy, Iz]):
-                h += q_tensor[i, j] * tensor(Sz, i1*i2)
-        return h
-
-    def hexadecapole_hamiltonian(self,Hx) -> Qobj:
-        # Hexadecapole term is not implemented in this context, but can be added similarly
-        return Hx * tensor(Sz, Iz*Iz*Iz*Iz)
-
-    # Define the Hamiltonian
-    def Full_hamiltonian(self,x: np.ndarray) -> Qobj: 
-        Bz, A, D, S1, S2, delta, alpha, Dz = x
-        return self.zeeman_full_hamiltonian(Bz) +\
-            self.hyperfine_hamiltonian(A) +\
-            self.full_quadrupole_hamiltonian_param(D, S1, S2, delta, alpha) +\
-            self.sdq_hamiltonian_param(Dz) #+\
-            #hexadecapole_hamiltonian(Hx)
-
-
     def Plot_Quadropole(self):
 
         fig,axs = plt.subplots(1,3, figsize=(8,6), tight_layout=True)
@@ -213,7 +167,7 @@ class Hamiltonian_Fitter():
         QYY = {}
         QZZ = {}
 
-        for state in State:
+        for state in [State.Excited,State.Ground]:
 
             QXX[state.value] = []
             QYY[state.value] = []
@@ -233,7 +187,7 @@ class Hamiltonian_Fitter():
 
                 else :
                     D, E, Q, delta = res[1], res[2], res[3], res[4]
-                    q_tensor = self.get_q_tensor(D, E, Q, delta)
+                    q_tensor = get_q_tensor(D, E, Q, delta)
                     Qx,Qy,Qz = np.linalg.eigvalsh(q_tensor)
 
                     QXX[state.value].append(Qx)
@@ -241,29 +195,29 @@ class Hamiltonian_Fitter():
                     QZZ[state.value].append(Qz)
 
 
-        axs[0].hist(QXX[State.Excited.value]-np.mean(QXX[State.Ground.value]), bins=20, alpha=0.5, label='Excited')
-        axs[0].hist(QXX[State.Ground.value]-np.mean(QXX[State.Ground.value]), bins=20, alpha=0.5, label='Ground')
+        axs[0].hist(QXX[State.Excited.value]-np.mean(QXX[State.Ground.value]), bins=20, alpha=0.5, label='Excited',density = False)
+        axs[0].hist(QXX[State.Ground.value]-np.mean(QXX[State.Ground.value]), bins=20, alpha=0.5, label='Ground',density = False)
         axs[0].set_xlabel(r'$Q_{XX}$')
         axs[0].set_title(f'{np.mean(QXX[State.Ground.value])}')
-        # axs[0].set_xlim(right=1,left=-1)
+        axs[0].set_xlim(right=0.1,left=-0.05)
 
-        axs[1].hist(QYY[State.Excited.value]-np.mean(QYY[State.Ground.value]), bins=20, alpha=0.5, label='Excited')
-        axs[1].hist(QYY[State.Ground.value]-np.mean(QYY[State.Ground.value]), bins=20, alpha=0.5, label='Ground')
+        axs[1].hist(QYY[State.Excited.value]-np.mean(QYY[State.Ground.value]), bins=20, alpha=0.5, label='Excited',density = False)
+        axs[1].hist(QYY[State.Ground.value]-np.mean(QYY[State.Ground.value]), bins=20, alpha=0.5, label='Ground',density = False)
         axs[1].set_xlabel(r'$Q_{YY}$')
         axs[1].set_title(f'{np.mean(QYY[State.Ground.value])}')
-        # axs[1].set_xlim(right=1,left=-1)
+        axs[1].set_xlim(right=0.1,left=-0.4)
 
-        axs[2].hist(QZZ[State.Excited.value]-np.mean(QZZ[State.Ground.value]), bins=20, alpha=0.5, label='Excited')
-        axs[2].hist(QZZ[State.Ground.value]-np.mean(QZZ[State.Ground.value]), bins=20, alpha=0.5, label='Ground')
+        axs[2].hist(QZZ[State.Excited.value]-np.mean(QZZ[State.Ground.value]), bins=20, alpha=0.5, label='Excited',density = False)
+        axs[2].hist(QZZ[State.Ground.value]-np.mean(QZZ[State.Ground.value]), bins=20, alpha=0.5, label='Ground',density = False)
         axs[2].set_xlabel(r'$Q_{ZZ}$')
         axs[2].set_title(f'{np.mean(QZZ[State.Ground.value])}')
-        # axs[2].set_xlim(right=1,left=-1)
+        axs[2].set_xlim(right=0.4,left=-0.15)
 
         axs[0].legend()
         axs[1].legend()
         axs[2].legend()
 
-        print("QYY[State.Excited.value]:", QYY[State.Excited.value])
+        # print("QYY[State.Excited.value]:", QYY[State.Excited.value])
 
         plt.show()
 
@@ -311,7 +265,7 @@ class Hamiltonian_Fitter():
     def plot_levels_and_residuals_separated(self, x, title='',args={}):
 
         if self.state == State.Excited :
-            h: Qobj = self.hamiltonian(x)
+            h: Qobj = hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             fit = excited_transitions 
             error = (excited_transitions - self.meas)
@@ -319,16 +273,16 @@ class Hamiltonian_Fitter():
 
 
         elif self.state == State.Ground :
-            h: Qobj = self.hamiltonian(x)
+            h: Qobj = hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             fit = ground_transitions
             error = (ground_transitions - self.meas)
             meas_to_plot = self.meas
 
         else :
-            h: Qobj = self.Full_hamiltonian(x)
+            h: Qobj = Full_hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
-            fit = np.concatenate((ground_transitions,excited_transitions+ground_transitions))
+            fit = np.concatenate((ground_transitions,excited_transitions))
             error = (np.concatenate((ground_transitions,excited_transitions - ground_transitions)) - self.meas)
             meas_to_plot = self.meas + np.concatenate((np.zeros(len(ground_transitions)),self.meas[:9]))
 

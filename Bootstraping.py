@@ -19,8 +19,10 @@ from functions import load_h5_to_dic
 from functions import complex_ramsey_fit
 
 dirpath = 'Z:/SPIN-001/Run2 [BFp4]/RamanManuRamsey9o2_interleaved/'
+dirpath = 'Z:/SPIN-001/Run2 [BFp4]/RamanEchoJaimeTrixV3/'
 # dirpath = 'Z:/SPIN-001/Run2 [BFp4]/RamanRamsey9o2_interleaved/'
 filename = '20260126173853__RamanManuRamsey9o2_interleaved.hdf5' 
+filename = '20260202121414__RamanEchoJaimeTrixV3.hdf5' 
 # filename = '20260119184019__RamanRamsey9o2_interleaved.hdf5'
 signal = load_h5_to_dic(dirpath + filename)[0]
 
@@ -36,13 +38,15 @@ def plot(
     artificial_detuning: int = None,
     drive_freq: int = None,
     plot: bool = True,
+    total_detuning: float = None,
     
 ):
 
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
     data_I = ((data_click[:, :, 0, 0] > threshold)).mean(0)
     data_Q = ((data_click[:, :, 1, 0] > threshold)).mean(0)
-    total_artificial_detuning = nuclear_detuning + artificial_detuning
+    if total_artificial_detuning == None:   
+        total_artificial_detuning = nuclear_detuning + artificial_detuning
     deviations = []
 
     # time = (time/4/wait_multiplier).astype(int)*4*wait_multiplier/1e6
@@ -200,9 +204,10 @@ def Bootstrap_analysis(time,x,y,guess,plot=False):
 
 nuclear_frequency  = [7_559_790,   6_893_756,    6_226_376,  5_556_583,    4_882_806,  4_200_214,    3_500_709,    2_768_085,  1_813_939]
 
-end_transition = signal["end_transition"]
+end_transition = 1 #signal["end_transition"]
 f1_fits = np.zeros(end_transition)
 stds = np.zeros(end_transition)
+print(signal.keys())
 
 for transition in range(end_transition):
 
@@ -211,9 +216,9 @@ for transition in range(end_transition):
 
 
 
-    data_click = signal["data_click"][:, transition, :, :, :]
+    data_click = signal["data_click"] #[:, transition, :, :, :]
     threshold = signal["threshold"]
-    meas_time = signal["meas_time"]
+    meas_time = signal["time"]
     meas_time_hours = signal["meas_time_hours"]
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
     nuclear_detuning = signal["nuclear_detuning"][transition]
