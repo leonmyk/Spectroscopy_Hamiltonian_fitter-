@@ -328,9 +328,9 @@ class Hamiltonian_Fitter():
         else :
             h: Qobj = self.Full_hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
-            fit = np.concatenate((ground_transitions,excited_transitions))
+            fit = np.concatenate((ground_transitions,excited_transitions+ground_transitions))
             error = (np.concatenate((ground_transitions,excited_transitions - ground_transitions)) - self.meas)
-            meas_to_plot = self.meas + np.concatenate((np.zeros(len(ground_transitions)),ground_transitions))
+            meas_to_plot = self.meas + np.concatenate((np.zeros(len(ground_transitions)),self.meas[:9]))
 
         
         
