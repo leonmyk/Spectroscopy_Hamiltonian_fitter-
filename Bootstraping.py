@@ -15,39 +15,39 @@ import time
 from datetime import *
 from matplotlib.collections import LineCollection
 import os, sys
-from functions import load_h5_to_dic
 from functions import complex_ramsey_fit
+from functions import load_h5_to_dic
+from functions import complex_ramsey_fit_n
 
-dirpath = 'Z:/SPIN-001/Run2 [BFp4]/RamanManuRamsey9o2_interleaved/'
-dirpath = 'Z:/SPIN-001/Run2 [BFp4]/RamanEchoJaimeTrixV3/'
-# dirpath = 'Z:/SPIN-001/Run2 [BFp4]/RamanRamsey9o2_interleaved/'
-filename = '20260126173853__RamanManuRamsey9o2_interleaved.hdf5' 
-filename = '20260202121414__RamanEchoJaimeTrixV3.hdf5' 
-# filename = '20260119184019__RamanRamsey9o2_interleaved.hdf5'
-signal = load_h5_to_dic(dirpath + filename)[0]
+
+
 
 def plot(
     data_click,
     N_RO,
-    wait_multiplier,
     threshold,
     transition,
-    time,
+    time_,
     plot_guess: bool = False,
-    nuclear_detuning : int = None,
-    artificial_detuning: int = None,
+    nuclear_detuning : int = 0,
+    artificial_detuning: int = 0,
     drive_freq: int = None,
     plot: bool = True,
-    total_detuning: float = None,
+    meas_time: float = 0,
+    plot_bootstrap:bool = False,
+    decay_time: float = 3000
     
 ):
-
+    
+    
+    data_I_before_averaging = ((data_click[:, :, 0, 0] > threshold))
+    data_Q_before_averaging = ((data_click[:, :, 1, 0] > threshold))
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-    data_I = ((data_click[:, :, 0, 0] > threshold)).mean(0)
-    data_Q = ((data_click[:, :, 1, 0] > threshold)).mean(0)
-    if total_artificial_detuning == None:   
-        total_artificial_detuning = nuclear_detuning + artificial_detuning
-    deviations = []
+    data_I = data_I_before_averaging.mean(0)
+    data_Q = data_Q_before_averaging.mean(0)
+    
+    total_artificial_detuning = nuclear_detuning + artificial_detuning
+
 
     # time = (time/4/wait_multiplier).astype(int)*4*wait_multiplier/1e6
 
@@ -55,21 +55,21 @@ def plot(
 
     complex_Ramsey_signal = data_I + 1j * data_Q
     fft_data = abs(np.fft.fft(complex_Ramsey_signal-complex_Ramsey_signal.mean()))
-    freqfft = np.fft.fftfreq(len(time), time[1] - time[0])
+    freqfft = np.fft.fftfreq(len(time_), time_[1] - time_[0])
     freqmax = freqfft[np.argmax((fft_data))]
     Z = np.concatenate([data_I, data_Q])
     # Initial parameter guesses for the curve fit
     # complex_ramsey_fit(t,f,T,phi,A,B)
     guess = [
         freqmax, # Frequency in Hz
-        5,  # Decay time constant T [ms]
+        decay_time,  # Decay time constant T [ms]
         -1* np.pi,
         (np.max(data_I) - np.min(data_I)) / 2,  # Amplitude
         (np.average(data_I) + np.average(data_Q)) / 2,  # offset
     ]
     try:
         # Perform curve fitting with initial guesses
-        params, params_covariance = curve_fit(complex_ramsey_fit, time, Z, p0=guess)
+        params, params_covariance = curve_fit(complex_ramsey_fit, time_, Z, p0=guess)
     except Exception as e:
         print("Fit failed:", e)
         params = guess  # Use initial guess if fit fails
@@ -77,14 +77,13 @@ def plot(
     # Extract fit parameters for display
     f1_fit, T_fit, phi1_fit, A1_fit, offset_fit = params
     
-    
-    std = Bootstrap_analysis(time, data_I,data_Q, params)
+    std = Bootstrap_analysis(time_, data_I_before_averaging,data_Q_before_averaging, params,plot=plot_bootstrap)
     print(f"Transition {transition}: Fitted Frequency = {1e3 * f1_fit:.2f} Hz,, Std = {std:.4f} kHz")
     fig = plt.figure(figsize=(15, 15))
     plt.subplot(321)
 
     # Generate a smooth line to overlay the fitted function
-    x = np.linspace(time[0], time[-1], 1001)
+    x = np.linspace(time_[0], time_[-1], 1001)
     
     if plot:
         if plot_guess:
@@ -101,7 +100,7 @@ def plot(
             complex_ramsey_fit(x, *params)[:len(x)],  # Ensure `params` matches the expected parameter count
             color=colors[transition],
             label = r"$f_{ground}$ =" +
-            f"{1e9 * total_artificial_detuning + 1e3 * f1_fit + drive_freq:.1f} Hz"
+            rf"{1e9 * total_artificial_detuning + 1e3 * f1_fit + drive_freq:.1f} Hz"
         )
         plt.plot(
             x,
@@ -110,8 +109,8 @@ def plot(
             color='black',
             alpha = 0.2
         )
-        plt.plot(time, data_I, "o", label=transition, color=colors[transition], markeredgecolor = 'black',)
-        plt.plot(time, data_Q, "o", label='Ramsey quadrature', color='black', markeredgecolor = 'black', alpha = 0.2)
+        plt.plot(time_, data_I, "o", label=transition, color=colors[transition], markeredgecolor = 'black',)
+        plt.plot(time_, data_Q, "o", label='Ramsey quadrature', color='black', markeredgecolor = 'black', alpha = 0.2)
         plt.ylabel("Population")
         plt.ylim(0, 1)
         plt.legend()
@@ -134,7 +133,7 @@ def plot(
         # Plot mean clicks over time
         plt.subplot(323)
 
-        plt.plot(time, data_click[:,:,0,0].mean(0), label=f"{transition}", color=colors[transition])
+        plt.plot(time_, data_click[:,:,0,0].mean(0), label=f"{transition}", color=colors[transition])
         plt.legend()
         plt.xlabel("Ramsey time (ms)")
         plt.title("Mean Clicks Over Time")
@@ -142,7 +141,7 @@ def plot(
         plt.subplot(322)
         complex_Ramsey_signal = data_I + 1j * data_Q
         fft_data = np.fft.fft(complex_Ramsey_signal-complex_Ramsey_signal.mean())
-        freqfft = np.fft.fftfreq(len(time), time[1] - time[0])
+        freqfft = np.fft.fftfreq(len(time_), time_[1] - time_[0])
         freqmax = freqfft[np.argmax(abs(fft_data))]
         plt.plot(np.fft.fftshift(freqfft), np.fft.fftshift(fft_data))
         plt.axvline(freqmax, ls = '--', color = 'black')
@@ -171,73 +170,232 @@ def plot(
 
     return f1_fit, std
 
-def Bootstrap_analysis(time,x,y,guess,plot=False):
+def Bootstrap_analysis(time_,x,y,guess,plot=False):
     n_bootstrap = 1000
     f1_bootstrapped = []
-    N = len(y)
+    N = y.shape[0]
+    fig,axs = plt.subplots(2)
+    time_dense = np.linspace(time_[0],time_[-1],1000)
+    x_avg = x.mean(0)
+
+    
     for _ in range(n_bootstrap):
-        indices = np.random.randint(0, N, N)
-        time_sampled = time[indices]
-        x_sampled = x[indices]
-        y_sampled = y[indices]
+        indices = np.random.choice(N, N ,replace = True)
+        x_sampled = x[indices,:].mean(0)
+        y_sampled = y[indices,:].mean(0)
         z_sampled = np.concatenate([x_sampled, y_sampled])
+
         try:
-            params, _ = curve_fit(complex_ramsey_fit, time_sampled, z_sampled, p0=guess)
-            f1_bootstrapped.append(params[0])
+            params, _ = curve_fit(complex_ramsey_fit, time_, z_sampled, p0=guess)
+            #delta_f, delta_t, delta_phi1, delta_A, delta_offset
+            error = np.abs(params-guess)
+            
+            max_error = [1/(time_[-1]-time_[0]),guess[1]*0.3,np.inf,guess[3]*0.5,guess[4]*0.5]
+            max_error = [1/(time_[-1]-time_[0]),np.inf,np.inf,np.inf,np.inf]
+            
+            if (np.sum(error>max_error) == 0):
+            
+                f1_bootstrapped.append(params[0]) 
+                axs[0].plot(time_dense,complex_ramsey_fit(time_dense,*params)[:len(time_dense)], alpha=0.1, color='black')
+                axs[0].plot(time_,x_sampled,'x', alpha=0.5, color='black')
+            
+            else :
+            
+                axs[0].plot(time_dense,complex_ramsey_fit(time_dense,*params)[:len(time_dense)], alpha=0.1, color='blue')
+
         except:
+            print('fit failed this is bad..')
+            
             continue
+        
+
+
     f1_bootstrapped = np.array(f1_bootstrapped)
     f1_means = np.mean(f1_bootstrapped)
     f1_std = np.std(f1_bootstrapped)
+    axs[0].set_title(rf'Bootstrap plot of signal std is {f1_std:.4f} KHz')
+
     if plot:
-        h = 3.5 * f1_std / (n_bootstrap ** (1/3))
-        bins = int((f1_bootstrapped.max() - f1_bootstrapped.min()) / h)
-        plt.hist(f1_bootstrapped, bins=30, alpha=0.7, color='blue')
-        plt.title(rf'Bootstrap Analysis of Fitted Frequency std is {f1_std:.4f} KHz')
-        plt.xlabel('Fitted Frequency (KHz)')
-        plt.ylabel('Occurrences')
-        plt.axvline(f1_means, color='red', linestyle='--')
+        axs[0].set_xlabel('Time (ms)')
+        axs[0].set_ylabel('population')
+        axs[0].set_ylim(0,1)
+        axs[0].plot(time_dense,complex_ramsey_fit(time_dense,*guess)[:len(time_dense)], color='red')
+        axs[0].plot(time_,x_avg,'o' ,color='red')
+
+
+        
+        
+        # h = 3.5 * f1_std / (n_bootstrap ** (1/3))
+        # bins = int((f1_bootstrapped.max() - f1_bootstrapped.min()) / h)
+        axs[1].hist(f1_bootstrapped, bins = 40)
+        axs[1].set_title(rf'Bootstrap Analysis of Fitted Frequency std is {f1_std:.4f} KHz')
+        axs[1].set_xlabel('Fitted Frequency (KHz)')
+        axs[1].set_ylabel('Occurrences')
+        axs[1].axvline(f1_means, color='red', linestyle='--')
+        
         plt.show()
     return f1_std
-     
+
+
+def plot_chunked_averages(threshold, transition, n, data_click, time_, meas_time,
+                          n_freq=1,decay_time = 3,
+                          ylim=(-0.2, 1.2), figsize=(12,10)):
+    """
+    signal: your data dict, uses signal["data_click"][...,0]
+    n:      chunk size
+    n_freq: number of frequencies to pick and fit (default 1)
+    """
+    data_click = data_click[...,0]
+    print(data_click.shape)
+    Ntotal, Nt = data_click.shape[:2]
+    n_chunks = Ntotal // n
+    if n_chunks == 0:
+        raise ValueError(f"Not enough data ({Ntotal}) for a single chunk of size {n}")
+    time_per_chunk = round(meas_time / n_chunks, 3)
     
-
-nuclear_frequency  = [7_559_790,   6_893_756,    6_226_376,  5_556_583,    4_882_806,  4_200_214,    3_500_709,    2_768_085,  1_813_939]
-
-end_transition = 1 #signal["end_transition"]
-f1_fits = np.zeros(end_transition)
-stds = np.zeros(end_transition)
-print(signal.keys())
-
-for transition in range(end_transition):
-
-
-
-
-
-
-    data_click = signal["data_click"] #[:, transition, :, :, :]
-    threshold = signal["threshold"]
-    meas_time = signal["time"]
-    meas_time_hours = signal["meas_time_hours"]
+    # set up a grid: n_chunks rows, 2 cols (time-domain & FFT)
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(n_chunks, 2, width_ratios=[3,1], hspace=0.4)
+    axs = gs.subplots(sharex=False, sharey=False)
+    
+    freq_evol = []
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-    nuclear_detuning = signal["nuclear_detuning"][transition]
-    artificial_detuning = signal["artificial_detuning"][transition]
-    # wait_multiplier = signal["wait_multiplier"]
-    N_RO = signal["N_RO"]
+    
+    data_I_before_averaging = ((data_click[:, :, 0] > threshold))
+    data_Q_before_averaging = ((data_click[:, :, 1] > threshold))
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    data_I = data_I_before_averaging.mean(0)
+    data_Q = data_Q_before_averaging.mean(0)
+    
+    complex_Ramsey_signal = data_I + 1j * data_Q
+    fft_data = abs(np.fft.fft(complex_Ramsey_signal-complex_Ramsey_signal.mean()))
+    freqfft = np.fft.fftfreq(len(time_), time_[1] - time_[0])
+    freqmax = freqfft[np.argmax((fft_data))]
+    Z = np.concatenate([data_I, data_Q])
+    # Initial parameter guesses for the curve fit
+    # complex_ramsey_fit(t,f,T,phi,A,B)
+    guess = [
+        freqmax, # Frequency in Hz
+        decay_time,  # Decay time constant T [ms]
+        -1* np.pi,
+        (np.max(data_I) - np.min(data_I)) / 2,  # Amplitude
+        (np.average(data_I) + np.average(data_Q)) / 2,  # offset
+    ]
+    try:
+        # Perform curve fitting with initial guesses
+        global_params, params_covariance = curve_fit(complex_ramsey_fit, time_, Z, p0=guess)
+    except Exception as e:
+        print("overall Fit failed:", e)
+        global_params = guess  # Use initial guess if fit fails
+        params_covariance = []
+    
+    for i in range(n_chunks):
+        # extract chunk
+        block = data_click[i*n:(i+1)*n, :, ...]
+        avg_real = (block > threshold).mean(axis=0)[:,0]
+        avg_imag = (block > threshold).mean(axis=0)[:,1]
+        Z = avg_real + 1j*avg_imag
+        
+        # FFT
+        fft_data = np.fft.fft(Z - Z.mean())
+        freqfft  = np.fft.fftfreq(len(time_), time_[1] - time_[0])
+        
+        # pick frequencies
+        mag    = np.abs(fft_data)
+        pos    = freqfft > 0
+        fpos   = freqfft[pos]
+        mpos   = mag[pos]
+        
+        if n_freq == 1:
+            idx_peak = np.argmax(mpos)
+            top_idx = [np.array(idx_peak)]
+            freqs_peak = np.array([fpos[idx_peak]])
+        else:
+            peaks, _   = find_peaks(mpos)
+            # take top n_freq
+            top_idx    = peaks[np.argsort(mpos[peaks])[-n_freq:]]
+            freqs_peak = np.sort(fpos[top_idx])
+        
+        # phase guesses from the FFT
+        pos_inds = np.where(freqfft > 0)[0]
+        phase_guesses = [
+            np.angle(fft_data[pos_inds[idx]])
+            for idx in top_idx
+        ]
 
+        # fit
+        try:
+            p_opt, _ = curve_fit(
+                complex_ramsey_fit,
+                time_,
+                np.concatenate([avg_real, avg_imag]),
+                p0=global_params
+            )
+        except Exception as e:
+            print(f"Fit failed in chunk {i}: {e}")
+            p_opt = np.array(guess)
+        
+        # store fitted frequencies (in Hz)
+        freq_evol.append(p_opt[:n_freq]*1e3)
+        
+        # --- plot time-domain + fit ---
+        ax_t = axs[i,0]
+        t_fit = np.linspace(time_[0], time_[-1], 1000)
+        fit_vals = complex_ramsey_fit(t_fit, *p_opt)
+        fit_real = fit_vals[:len(t_fit)]
+        fit_imag = fit_vals[len(t_fit):]
+        
+        ax_t.plot(t_fit, fit_real, lw = 3, color=colors[transition], label="fit Re")
+        ax_t.plot(t_fit, fit_imag, '--', lw = 3, color=colors[transition], alpha=0.6, label="fit Im")
+        ax_t.plot(time_, avg_real, 'o', color=colors[transition], markeredgecolor='k',
+                  label=f"{i*time_per_chunk}h – {(i+1)*time_per_chunk}h")
+        ax_t.plot(time_, avg_imag, 'o', color='k', alpha=0.3)
+        ax_t.set_ylim(*ylim)
+        # annotate T2* on the time-domain axis in the top-left corner
+        T_fit = p_opt[n_freq]
+        ax_t.text(
+            0.55, 0.95,
+            f"$T_2^* = {T_fit:.1f}\\,\\mathrm{{ms}}$",
+            transform=ax_t.transAxes,
+            ha="left",
+            va="top"
+        )
+        # ax_t.legend(fontsize = 10, loc="upper right")
+        if i == n_chunks-1:
+            ax_t.set_xlabel("Ramsey time (ms)")
+        ax_t.set_ylabel("Population")
+        
+        # --- plot FFT in dB or linear ---
+        ax_f = axs[i,1]
+        ax_f.plot(fpos, mpos, '-')
+        for fp in freqs_peak:
+            ax_f.axvline(fp, color='r', linestyle='--')
+            ax_f.text(fp, ax_f.get_ylim()[1]*0.8,
+                      f"{fp*1e3:.2f} Hz", rotation=90,
+                      va='top', fontsize=8)
+        if i == n_chunks-1:
+            ax_f.set_xlabel("Frequency (Hz)")
+        ax_f.set_ylabel("|FFT|")
+        ax_f.set_yticks([])
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # plot evolution of all fitted frequencies
+    freq_evol = np.array(freq_evol)  # shape (n_chunks, n_freq)
+    time_axis = np.arange(n_chunks) * time_per_chunk
+    fig2, ax2 = plt.subplots(figsize=(6,4))
+    for j in range(n_freq):
+        ax2.plot(
+        time_axis,
+        freq_evol[:, j] - freq_evol[:, j].mean(),
+        '-o',
+        markeredgecolor='k',
+        label=f"{freq_evol[:, j].mean():.2f} Hz"
+    )
 
-    start_time=10000
-    end_time=3_010_000
-    n_steps=41
-
-    # start_time = 10000
-    # end_time = 1000000000
-    # n_steps = 41
-
-    ramsey_times = np.linspace(start_time,end_time,n_steps)*1e-6  # Convert to ms
-    f1_fits[transition], stds[transition] = plot(data_click, N_RO, 1, threshold, transition, ramsey_times, plot_guess=False,plot = True, nuclear_detuning=nuclear_detuning, artificial_detuning=artificial_detuning, drive_freq=nuclear_frequency[transition])
-
-
-print("Fitted frequencies (kHz):", f1_fits)
-print("Fitted frequencies std (kHz):", stds)
+    ax2.set_xlabel("Measurement Time (h)")
+    ax2.set_ylabel(r"$\Delta f$ (Hz)")
+    ax2.legend(loc="upper right")
+    plt.tight_layout()     
+    

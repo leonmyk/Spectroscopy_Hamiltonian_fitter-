@@ -53,10 +53,30 @@ Iy = jmat(I, 'y')
 Iz = jmat(I, 'z')
 
 meas_Aperp = 51.
+meas_Aperp = 48.
 
 
 simu_A = np.array([[-441.66244757, -0.05970534,-6.00098845],[ -0.05970534, -441.66856909, 5.70123131],[ -6.00098845,5.70123131 ,131.30594568]])
 
+def complex_ramsey_fit_n(t, *params):
+    """
+    Multi-frequency complex Ramsey: 
+      Z(t) = sum_{i=1}^n A_i * exp[i(2π f_i t + φ_i)] * exp(-t/T) + B*(1+1j)
+    params layout: [f_1..f_n, T, φ_1..φ_n, A_1..A_n, B]
+    """
+    n = (len(params) - 2) // 3
+    freqs = params[0:n]
+    T     = params[n]
+    phis  = params[n+1:2*n+1]
+    amps  = params[2*n+1:3*n+1]
+    B     = params[-1]
+    
+    Z = np.zeros_like(t, dtype=complex)
+    for i in range(n):
+        Z += amps[i] * np.exp(1j*(2*np.pi*freqs[i]*t + phis[i])) * np.exp(-t/T)
+    Z += B * (1 + 1j)
+    # return concatenated real+imag for curve_fit
+    return np.concatenate([Z.real, Z.imag])
 
 def load_h5_to_dic(fullpath):
     with h5py.File(fullpath, 'r') as file:
@@ -83,7 +103,7 @@ def complex_ramsey_fit(t,f,T,phi,A,B):
         return np.concatenate([np.real(Z),np.imag(Z)])
     
     
-def hyperfine_hamiltonian(self,A) -> Qobj:
+def hyperfine_hamiltonian(A) -> Qobj:
     h = 0 # Hyperfine interaction 
     for i, s_op in enumerate([Sx, Sy]):
         for j, i_op in enumerate([Ix, Iy, Iz]):
@@ -117,7 +137,7 @@ def get_q_tensor(D, E, Q, delta):
     return q_tensor
 
 
-def get_full_q_tensor(self, D, S1, S2, delta, theta):
+def get_full_q_tensor(D, S1, S2, delta, theta):
     cos1 = S1 * np.cos(theta)
     sin1 = S1 * np.sin(theta)
     cos2 = S2 * np.cos(2 * delta + 2 * theta)
@@ -130,7 +150,7 @@ def get_full_q_tensor(self, D, S1, S2, delta, theta):
     return q_tensor
 
 def full_quadrupole_hamiltonian_param(D, S1, S2, delta, theta) -> Qobj:
-    q_tensor = get_q_tensor(D, S1, S2, delta, theta)
+    q_tensor = get_full_q_tensor(D, S1, S2, delta, theta)
     h = 0
     for i, i1 in enumerate([Ix, Iy, Iz]):
         for j, i2 in enumerate([Ix, Iy, Iz]):
@@ -147,8 +167,26 @@ def Full_hamiltonian(x: np.ndarray) -> Qobj:
         sdq_hamiltonian_param(Dz) #+\
         #hexadecapole_hamiltonian(Hx)
         
-        
-        
+def normalise_Histogram_Height(data1,data2,bins1,bins2):
+
+    # choose bins independently (examples)
+    edges1 = np.histogram_bin_edges(data1, bins=bins1)     # or 'fd', 'auto', etc.
+    edges2 = np.histogram_bin_edges(data2, bins=bins2)
+
+    c1, e1 = np.histogram(data1, bins=edges1)
+    c2, e2 = np.histogram(data2, bins=edges2)
+
+    c1 = c1 / c1.max()
+    c2 = c2 / c2.max()
+
+    w1 = np.diff(e1)
+    w2 = np.diff(e2)
+    
+    return (e1[:-1], c1, w1),(e2[:-1], c2, w2)
+
+
+    
+    
 def hexadecapole_hamiltonian(Hx) -> Qobj:
     # Hexadecapole term is not implemented in this context, but can be added similarly
     return Hx * tensor(Sz, Iz*Iz*Iz*Iz)

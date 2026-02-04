@@ -28,6 +28,7 @@ from functions import Full_hamiltonian
 from functions import hamiltonian
 from functions import hamiltonian_Heca
 from functions import get_q_tensor
+from functions import normalise_Histogram_Height
 
 # Constants
 mu_Nb = 10.4213  # [kHz / mT]
@@ -56,14 +57,15 @@ manu_ramsey_meas = np.array([-134296, -133678, -132898, -131896, -130532, -12869
 
 class Hamiltonian_Fitter():
 
-    def __init__(self, meas, d_meas, state:State,id:str = '00', meas_Aperp:float = None , simu_A:float = None):
+    def __init__(self, meas, std_meas, state:State,id:str = '00', meas_Aperp:float = None , simu_A:float = None):
 
         self.state = state
         self.meas = meas
-        self.d_meas = d_meas
+        self.std_meas = std_meas
         self.best_x = {}
         self.median_x = {}
         self.results = {}
+        self.sampler = None
         self.meas_Aperp = meas_Aperp
         self.simu_A = simu_A
         self.id = id
@@ -110,25 +112,25 @@ class Hamiltonian_Fitter():
         if self.state == State.Excited :
             h: Qobj = hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
-            residuals = (excited_transitions - self.meas) / self.d_meas + self.log_prior(x)
+            residuals = (excited_transitions - self.meas) / self.std_meas + self.log_prior(x)
 
         elif self.state == State.Ground :
             h: Qobj = hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
-            residuals = (ground_transitions - self.meas) / self.d_meas + self.log_prior(x)
+            residuals = (ground_transitions - self.meas) / self.std_meas + self.log_prior(x)
             
         elif self.state == State.Full :
             h: Qobj = Full_hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             meas_to_compare = np.concatenate((self.meas[:9],self.meas[9:] + self.meas[:9]))
-            residuals = (np.concatenate((ground_transitions,excited_transitions)) - meas_to_compare) / self.d_meas
+            residuals = (np.concatenate((ground_transitions,excited_transitions)) - meas_to_compare) / self.std_meas
 
         elif self.state == State.Heca :
             h: Qobj = hamiltonian_Heca(x)
             ground_transitions, _ = self.get_transitions_separated(h.eigenenergies())
             jaime_energies = np.dif(ground_transitions)
             meas_to_compare = np.concatenate((self.meas[:9],self.meas[9:] + self.meas[:9]))
-            residuals = (jaime_energies- self.meas) / self.d_meas
+            residuals = (jaime_energies- self.meas) / self.std_meas
         
 
         residuals_sum = -0.5 * np.sum(residuals**2)+ self.log_prior_full(x) if self.state == State.Full else -0.5 * np.sum(residuals**2)+ self.log_prior(x)
@@ -140,12 +142,6 @@ class Hamiltonian_Fitter():
             
         n_points = 300
         x_list = np.array([np.copy(guess)] for i in range(n_points))
-        
-        
-        
-        
-        
-        
         
     def get_full_q_tensor(self, D, S1, S2, delta, theta):
         cos1 = S1 * np.cos(theta)
@@ -195,23 +191,36 @@ class Hamiltonian_Fitter():
                     QZZ[state.value].append(Qz)
 
 
-        axs[0].hist(QXX[State.Excited.value]-np.mean(QXX[State.Ground.value]), bins=20, alpha=0.5, label='Excited',density = False)
-        axs[0].hist(QXX[State.Ground.value]-np.mean(QXX[State.Ground.value]), bins=20, alpha=0.5, label='Ground',density = False)
-        axs[0].set_xlabel(r'$Q_{XX}$')
-        axs[0].set_title(f'{np.mean(QXX[State.Ground.value])}')
-        axs[0].set_xlim(right=0.1,left=-0.05)
 
-        axs[1].hist(QYY[State.Excited.value]-np.mean(QYY[State.Ground.value]), bins=20, alpha=0.5, label='Excited',density = False)
-        axs[1].hist(QYY[State.Ground.value]-np.mean(QYY[State.Ground.value]), bins=20, alpha=0.5, label='Ground',density = False)
+        QZZ_ex_offsets = (QZZ[State.Excited.value]-np.mean(QZZ[State.Ground.value]))*1e3
+        QZZ_gd_offsets = (QZZ[State.Ground.value]-np.mean(QZZ[State.Ground.value]))*1e3
+        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QZZ_ex_offsets,QZZ_gd_offsets,40,4)
+        axs[0].bar(e_g, c_g, width=w1, align="edge", alpha=0.4, label="Ground")
+        axs[0].bar(e_e, c_e, width=w2, align="edge", alpha=0.4, label="Excited")
+        axs[0].set_xlabel(r'$Q_{XX}$')
+        axs[0].set_title(f'{np.mean(QZZ[State.Ground.value])}')
+        axs[0].set_xlim(right=100,left=-100)
+
+        QYY_ex_offsets = (QYY[State.Excited.value]-np.mean(QYY[State.Ground.value]))*1e3
+        QYY_gd_offsets = (QYY[State.Ground.value]-np.mean(QYY[State.Ground.value]))*1e3
+        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QYY_ex_offsets,QYY_gd_offsets,40,4)
+        axs[1].bar(e_g, c_g, width=w1, align="edge", alpha=0.4, label="Ground")
+        axs[1].bar(e_e, c_e, width=w2, align="edge", alpha=0.4, label="Excited")
         axs[1].set_xlabel(r'$Q_{YY}$')
         axs[1].set_title(f'{np.mean(QYY[State.Ground.value])}')
-        axs[1].set_xlim(right=0.1,left=-0.4)
-
-        axs[2].hist(QZZ[State.Excited.value]-np.mean(QZZ[State.Ground.value]), bins=20, alpha=0.5, label='Excited',density = False)
-        axs[2].hist(QZZ[State.Ground.value]-np.mean(QZZ[State.Ground.value]), bins=20, alpha=0.5, label='Ground',density = False)
+        axs[1].set_xlim(right=60,left=-100)
+ 
+ 
+ 
+        QXX_ex_offsets = (QXX[State.Excited.value]-np.mean(QXX[State.Ground.value]))*1e3
+        QXX_gd_offsets = (QXX[State.Ground.value]-np.mean(QXX[State.Ground.value]))*1e3
+        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QXX_ex_offsets,QXX_gd_offsets,40,1)
+        
+        axs[2].bar(e_g, c_g, width=w1, align="edge", alpha=0.4, label="Ground")
+        axs[2].bar(e_e, c_e, width=w2, align="edge", alpha=0.4, label="Excited")
         axs[2].set_xlabel(r'$Q_{ZZ}$')
-        axs[2].set_title(f'{np.mean(QZZ[State.Ground.value])}')
-        axs[2].set_xlim(right=0.4,left=-0.15)
+        axs[2].set_title(f'{np.mean(QXX[State.Ground.value])}')
+        axs[2].set_xlim(right=100,left=-40)
 
         axs[0].legend()
         axs[1].legend()
@@ -244,7 +253,7 @@ class Hamiltonian_Fitter():
         plt.errorbar(
             range(len(fit[:9])),
             (error[:9]) * 1e3,fmt = 'o',
-            yerr=self.d_meas[:9] * 1e3,
+            yerr=self.std_meas[:9] * 1e3*2,
             marker = 'v', color = 'orange'
         )
         plt.ylabel(r'$residual_{{\downarrow}} [Hz]$')
@@ -253,7 +262,7 @@ class Hamiltonian_Fitter():
         plt.errorbar(
             range(len(fit[:9])),
             (error[9:]) * 1e3,fmt = 'o',
-            yerr=self.d_meas[9:] * 1e3,
+            yerr=self.std_meas[9:] * 1e3*2,
             marker = '^', color = 'blue'
         )
         plt.xlabel('Transition')
@@ -302,14 +311,34 @@ class Hamiltonian_Fitter():
         plt.errorbar(
             range(len(fit)),
             (error) * 1e3,
-            yerr=self.d_meas * 1e3
+            yerr=self.std_meas * 1e3*2
         )
         plt.xlabel('Transition')
         plt.ylabel(rf'res$( f_{self.state.value})$ [Hz]')
 
         plt.show()
+        
+    def chains(self):
+        # Get the chains from the sampler
+        
+        if self.state == State.Full:
+            labels = ["Bz", "A", "D", "S1", "S2", "delta", "alpha", "Dz"]
+        else :
+            labels = ["Bz", "D", "E", "F", "delta"]
+
+        chains = self.sampler.get_chain(discard=500)
+        ndim = chains.shape[2]
+
+        fig, axes = plt.subplots(ndim, 1, figsize=(10, 2 * ndim), tight_layout=True, sharex=True)
+        for i in range(ndim):
+            ax = axes[i]
+            ax.plot(chains[:, :, i], alpha=0.5,)  # Plot all walkers for parameter i
+            ax.set_ylabel(labels[i])
+
+        plt.show()
 
     def run_MCMC(self, guess,nwalkers=64, nsteps=10000, var = 0.01):
+        
 
         if self.state == State.Full :
             log_likelihood = self.get_log_likelihood_separated  
@@ -317,7 +346,10 @@ class Hamiltonian_Fitter():
             log_likelihood = self.get_log_likelihood_separated
 
         pos = guess * (1 +  var * np.random.randn(nwalkers, len(guess)))
-
+        
+        self.results = {}
+        self.sampler = None
+        
         with Pool() as pool:
             sampler = emcee.EnsembleSampler(nwalkers, len(guess), log_likelihood, pool=pool)
             sampler.run_mcmc(pos, nsteps, progress=True)
@@ -400,5 +432,4 @@ class Hamiltonian_Fitter():
             labels = ["Bz", "D", "E", "Q", "delta"]
         fig = corner.corner(self.results[self.state.value], labels=labels, truths=self.median_x[self.state.value])
         plt.show()
-
 
