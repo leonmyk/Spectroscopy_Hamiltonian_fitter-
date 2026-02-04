@@ -7,7 +7,6 @@ import h5py
 from pathlib import Path
 import numpy as np
 import pandas as pd
-import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 import sys
@@ -184,8 +183,43 @@ def normalise_Histogram_Height(data1,data2,bins1,bins2):
     
     return (e1[:-1], c1, w1),(e2[:-1], c2, w2)
 
+def _sig_decimals(err, sig_figs=2):
+    """
+    Return the number of decimals needed to keep `sig_figs`
+    significant figures of an uncertainty `err`.
 
-    
+    Example:
+    err = 0.0123  -> 3  (0.012 shown with 2 s.f.)
+    err = 3.4     -> -1 ( 3  shown with 2 s.f.)
+    """
+    if err == 0:
+        return 0
+    exponent = int(np.floor(np.log10(err)))
+    return max(0, sig_figs - 1 - exponent)
+
+def pretty_mcmc(flat_samples, sig_figs=2):
+    """
+    Print median and asymmetric 1-sigma errors with only the
+    relevant digits for each parameter.
+    """
+    ndim = flat_samples.shape[1]
+    high_low = np.zeros((ndim, 3))
+
+    for i in range(ndim):
+        p16, p50, p84 = np.percentile(flat_samples[:, i], [16, 50, 84])
+        q_minus, q_plus = p50 - p16, p84 - p50
+        # Use the larger side as a conservative uncertainty
+        err = max(q_minus, q_plus)
+        ndp = _sig_decimals(err, sig_figs)
+
+        fmt = f"{{:.{ndp}f}}"
+        central = fmt.format(p50)
+        low    = fmt.format(q_minus)
+        high   = fmt.format(q_plus)
+        high_low[i] = [low, central,high]
+
+    return high_low
+
     
 def hexadecapole_hamiltonian(Hx) -> Qobj:
     # Hexadecapole term is not implemented in this context, but can be added similarly

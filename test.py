@@ -53,6 +53,9 @@ def main():
 
     fitter_full = Hamiltonian_Fitter(full_meas,d_full_meas,State.Full, meas_Aperp = A_perp_meas,simu_A= A_simu,id = exp_id)
     fitter_full.Load_results()
+    fitter_full.Plot_Best()
+    fitter_full.Print_values()
+    fitter_full.chains()
     fitter_full.Plot_Quadropole()
 
 if __name__ == "__main__":
