@@ -143,17 +143,63 @@ class Hamiltonian_Fitter():
         residuals_sum = -0.5 * np.sum(residuals**2)+ self.log_prior_full(x) if self.state == State.Full else -0.5 * np.sum(residuals**2)+ self.log_prior(x)
         return residuals_sum
 
-    def Get_deriv(self,offset,guess = None,indices_to_plot = [0]):
+    def Get_deriv(self, offset, guess=None, indices_to_plot=[0]):
+
         if guess == None:
-            guess = self.best_x['ground']
-            
+            guess = self.best_x[self.state.value]
+
         n_points = 300
-        x_list = np.array([np.copy(guess)] for i in range(n_points))
-        x_list[:,0] + np.linspace(-offset,+offset,n_points)
-        hs = [hamiltonian(x_list[i]) for i in range(n_points) ]
-        energies = np.array([self.get_transitions_separated(hs[i].eigenenergies()) for i in range(n_points)])
-        derirative = np.diff(energies,x_list[:,0] + np.linspace(-offset,+offset,n_points))
-        
+        x_list = np.array([np.copy(guess) for i in range(n_points)])
+        x_list[:, 0] = x_list[:, 0] + np.linspace(-offset, +offset, n_points)
+
+        hs = [hamiltonian(x_list[i]) for i in range(n_points)]
+        energies = np.array([
+            np.concatenate(self.get_transitions_separated(hs[i].eigenenergies()))
+            for i in range(n_points)
+        ])
+
+        gradients = np.gradient(energies, x_list[:, 0], axis=0)
+
+        center_idx = n_points // 2
+
+        fig, ax = plt.subplots(2, figsize=(8, 20), sharex=True)
+
+        for i in indices_to_plot:
+            dEdB_center = gradients[center_idx, i]
+
+            label = (
+                f"Transition {i}  "
+                f"(dE/dB = {dEdB_center:.2f} kHz/mT)"
+            )
+
+            ax[0].plot(x_list[:, 0], energies[:, i], label=label)
+            ax[1].plot(x_list[:, 0], gradients[:, i], label=label)
+
+        # Axis labels
+        ax[1].set_xlabel("Magnetic field (mT)")
+        ax[0].set_ylabel("Energy (kHz)")
+        ax[1].set_ylabel("dE / dB (kHz / mT)")
+
+        # Titles
+        ax[0].set_title("Transition energies")
+        ax[1].set_title("Energy derivatives")
+
+        # Legends
+        ax[0].legend()
+        ax[1].legend()
+        ax[0].legend(loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0)
+        ax[1].legend(loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0)
+
+
+        # Global title
+        fig.suptitle(
+            f"Spectroscopy around B = {guess[0]:.4f} mT",
+            fontsize=12
+        )
+
+        plt.tight_layout(rect=[0, 0, 1, 0.95])
+        plt.show()
+
         
         
         
