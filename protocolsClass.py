@@ -143,12 +143,20 @@ class Hamiltonian_Fitter():
         residuals_sum = -0.5 * np.sum(residuals**2)+ self.log_prior_full(x) if self.state == State.Full else -0.5 * np.sum(residuals**2)+ self.log_prior(x)
         return residuals_sum
 
-    def Get_deriv(self,BZ_vals,guess = None):
+    def Get_deriv(self,offset,guess = None,indices_to_plot = [0]):
         if guess == None:
             guess = self.best_x['ground']
             
         n_points = 300
         x_list = np.array([np.copy(guess)] for i in range(n_points))
+        x_list[:,0] + np.linspace(-offset,+offset,n_points)
+        hs = [hamiltonian(x_list[i]) for i in range(n_points) ]
+        energies = np.array([self.get_transitions_separated(hs[i].eigenenergies()) for i in range(n_points)])
+        derirative = np.diff(energies,x_list[:,0] + np.linspace(-offset,+offset,n_points))
+        
+        
+        
+        
         
     def get_full_q_tensor(self, D, S1, S2, delta, theta):
         cos1 = S1 * np.cos(theta)
@@ -240,7 +248,7 @@ class Hamiltonian_Fitter():
 
     def Plot_full(self, x, title='Full Fit'):
 
-        h: Qobj = self.Full_hamiltonian(x)
+        h: Qobj = Full_hamiltonian(x)
         ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
         fit = np.concatenate((ground_transitions,excited_transitions))
         error = (np.concatenate((ground_transitions,excited_transitions - ground_transitions)) - self.meas)

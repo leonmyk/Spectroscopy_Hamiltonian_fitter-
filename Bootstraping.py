@@ -20,7 +20,35 @@ from functions import load_h5_to_dic
 from functions import complex_ramsey_fit_n
 
 
+def Chunk_Data(signal,chunk_size = None,nb_chunks = None):
 
+    chunk_size = 136
+    chunked_signals = []
+
+    # =========================
+    # Raw data
+    # =========================
+    data_click = signal["data_click"] # (N_avg, N_time, I/Q, ...)
+
+    n_avg, n_time = data_click.shape[:2]
+    if nb_chunks == None:
+        n_chunks = n_avg // chunk_size
+    elif chunk_size == None:
+        chunk_size = n_avg//n_chunks
+    else :
+        print("need chunk size or number of chunks at least...")
+    
+
+    for k in range(n_chunks):
+        sl = slice(k * chunk_size, (k + 1) * chunk_size)
+        signal_to_add = signal.copy()
+        signal_to_add["data_click"] = signal["data_click"][sl,:,:,:]
+        signal_to_add["meas_time_hours"] = signal["meas_time_hours"]/n_chunks
+        signal_to_add["iteration"] = signal["iteration"]/n_chunks
+        
+        chunked_signals.append(signal_to_add)
+        
+    return chunked_signals
 
 def plot(
     data_click,
@@ -45,7 +73,8 @@ def plot(
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
     data_I = data_I_before_averaging.mean(0)
     data_Q = data_Q_before_averaging.mean(0)
-    
+
+
     total_artificial_detuning = nuclear_detuning + artificial_detuning
 
 
@@ -78,7 +107,7 @@ def plot(
     f1_fit, T_fit, phi1_fit, A1_fit, offset_fit = params
     
     std = Bootstrap_analysis(time_, data_I_before_averaging,data_Q_before_averaging, params,plot=plot_bootstrap)
-    print(f"Transition {transition}: Fitted Frequency = {1e3 * f1_fit:.2f} Hz,, Std = {std:.4f} kHz")
+    print(f"Transition {transition}: Fitted Frequency = {1e3 * f1_fit:.2f} Hz,, Std = {std*1e3:.4f} Hz")
     fig = plt.figure(figsize=(15, 15))
     plt.subplot(321)
 
@@ -175,6 +204,7 @@ def Bootstrap_analysis(time_,x,y,guess,plot=False):
     f1_bootstrapped = []
     N = y.shape[0]
     fig,axs = plt.subplots(2)
+    fig.tight_layout()
     time_dense = np.linspace(time_[0],time_[-1],1000)
     x_avg = x.mean(0)
 
@@ -213,7 +243,7 @@ def Bootstrap_analysis(time_,x,y,guess,plot=False):
     f1_bootstrapped = np.array(f1_bootstrapped)
     f1_means = np.mean(f1_bootstrapped)
     f1_std = np.std(f1_bootstrapped)
-    axs[0].set_title(rf'Bootstrap plot of signal std is {f1_std:.4f} KHz')
+    axs[0].set_title(rf'Bootstrap plot of signal std is {f1_std*1e3:.4f} Hz')
 
     if plot:
         axs[0].set_xlabel('Time (ms)')
@@ -228,7 +258,7 @@ def Bootstrap_analysis(time_,x,y,guess,plot=False):
         # h = 3.5 * f1_std / (n_bootstrap ** (1/3))
         # bins = int((f1_bootstrapped.max() - f1_bootstrapped.min()) / h)
         axs[1].hist(f1_bootstrapped, bins = 40)
-        axs[1].set_title(rf'Bootstrap Analysis of Fitted Frequency std is {f1_std:.4f} KHz')
+        axs[1].set_title(rf'Bootstrap Analysis of Fitted Frequency std is {f1_std*1e3:.4f} Hz')
         axs[1].set_xlabel('Fitted Frequency (KHz)')
         axs[1].set_ylabel('Occurrences')
         axs[1].axvline(f1_means, color='red', linestyle='--')
