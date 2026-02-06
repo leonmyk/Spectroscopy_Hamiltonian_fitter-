@@ -149,34 +149,49 @@ class Hamiltonian_Fitter():
             guess = self.best_x[self.state.value]
 
         n_points = 300
-        x_list = np.array([np.copy(guess) for i in range(n_points)])
-        x_list[:, 0] = x_list[:, 0] + np.linspace(-offset, +offset, n_points)
+        x_list1 = np.array(np.copy(guess))
+        x_list2 = np.array(np.copy(guess))
+        
+        
+        x_list1[0] = x_list1[0] - offset
+        x_list2[0] = x_list2[0] + offset
 
-        hs = [hamiltonian(x_list[i]) for i in range(n_points)]
-        energies = np.array([
-            np.concatenate(self.get_transitions_separated(hs[i].eigenenergies()))
-            for i in range(n_points)
-        ])
+        h1 = Full_hamiltonian(x_list1) if self.state == State.Full else hamiltonian(x_list1)
+        h2 = Full_hamiltonian(x_list2) if self.state == State.Full else hamiltonian(x_list2)
+        
+        energies1 = np.concatenate(self.get_transitions_separated(h1.eigenenergies()))
+        energies2 = np.concatenate(self.get_transitions_separated(h2.eigenenergies()))
 
-        gradients = np.gradient(energies, x_list[:, 0], axis=0)
+        gradients = (energies2-energies1)/(2*offset)
 
-        center_idx = n_points // 2
 
         fig, ax = plt.subplots(2, figsize=(8, 20), sharex=True)
+        colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        w_center = (energies1 + energies2)/2
 
-        for i in indices_to_plot:
-            dEdB_center = gradients[center_idx, i]
-
-            label = (
+        label_e = ''
+        label_d = ''
+        
+        for i in indices_to_plot :
+        
+            label_e += (
+                "\n"
                 f"Transition {i}  "
-                f"(dE/dB = {dEdB_center:.2f} kHz/mT)"
+                f"(w = {w_center[i]:.2f} kHz)"
+            )
+            
+            label_d += (
+                "\n"
+                f"Transition {i}  "
+                f"(dE/dB = {gradients[i]:.2f} kHz/mT)"
             )
 
-            ax[0].plot(x_list[:, 0], energies[:, i], label=label)
-            ax[1].plot(x_list[:, 0], gradients[:, i], label=label)
+        ax[0].plot(indices_to_plot,w_center[indices_to_plot],'o', label=label_e)
+        ax[1].plot(indices_to_plot,gradients[indices_to_plot],'o', label=label_d)
+            
 
         # Axis labels
-        ax[1].set_xlabel("Magnetic field (mT)")
+        ax[1].set_xlabel("transition")
         ax[0].set_ylabel("Energy (kHz)")
         ax[1].set_ylabel("dE / dB (kHz / mT)")
 
@@ -187,13 +202,13 @@ class Hamiltonian_Fitter():
         # Legends
         ax[0].legend()
         ax[1].legend()
-        ax[0].legend(loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0)
-        ax[1].legend(loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0)
+        # ax[0].legend(loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0)
+        # ax[1].legend(loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0)
 
 
         # Global title
         fig.suptitle(
-            f"Spectroscopy around B = {guess[0]:.4f} mT",
+            f"Spectroscopy around B = {guess[0]:.4f} mT using " + self.state.value + " hamiltonian",
             fontsize=12
         )
 
