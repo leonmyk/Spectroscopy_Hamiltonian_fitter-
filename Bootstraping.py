@@ -4,7 +4,6 @@ import time
 from pathlib import Path
 import glob
 import h5py
-from pathlib import Path
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -265,7 +264,6 @@ def Bootstrap_analysis(time_,x,y,guess,plot=False):
         
         plt.show()
     return f1_std
-
 
 def plot_chunked_averages(threshold, transition, n, data_click, time_, meas_time,
                           n_freq=1,decay_time = 3,
