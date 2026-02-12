@@ -16,7 +16,11 @@ from matplotlib.collections import LineCollection
 import os, sys
 from functions import complex_ramsey_fit
 from functions import load_h5_to_dic
-from functions import complex_ramsey_fit_n
+from functions import complex_ramsey_gaussian_fit
+
+
+
+
 
 
 def Chunk_Data(signal,chunk_size = None,nb_chunks = None):
@@ -62,7 +66,8 @@ def plot(
     plot: bool = True,
     meas_time: float = 0,
     plot_bootstrap:bool = False,
-    decay_time: float = 3000
+    decay_time: float = 3000,
+    fit_func = complex_ramsey_gaussian_fit
     
 ):
     
@@ -91,13 +96,13 @@ def plot(
     guess = [
         freqmax, # Frequency in Hz
         decay_time,  # Decay time constant T [ms]
-        -1* np.pi,
+        -1 * np.pi,
         (np.max(data_I) - np.min(data_I)) / 2,  # Amplitude
         (np.average(data_I) + np.average(data_Q)) / 2,  # offset
     ]
     try:
         # Perform curve fitting with initial guesses
-        params, params_covariance = curve_fit(complex_ramsey_fit, time_, Z, p0=guess)
+        params, params_covariance = curve_fit(fit_func, time_, Z, p0=guess)
     except Exception as e:
         print("Fit failed:", e)
         params = guess  # Use initial guess if fit fails
@@ -105,7 +110,7 @@ def plot(
     # Extract fit parameters for display
     f1_fit, T_fit, phi1_fit, A1_fit, offset_fit = params
     
-    std = Bootstrap_analysis(time_, data_I_before_averaging,data_Q_before_averaging, params,plot=plot_bootstrap)
+    std = Bootstrap_analysis(time_, data_I_before_averaging,data_Q_before_averaging, params,plot=plot_bootstrap, fit_func = fit_func)
     print(f"Transition {transition}: Fitted Frequency = {1e3 * f1_fit:.2f} Hz,, Std = {std*1e3:.4f} Hz")
     fig = plt.figure(figsize=(15, 15))
     plt.subplot(321)
@@ -117,7 +122,7 @@ def plot(
         if plot_guess:
             plt.plot(
                 x,
-                complex_ramsey_fit(x, *guess)[:len(x)],
+                fit_func(x, *guess)[:len(x)],
                 label="Guess: Dual Cosine with Decay",
                 linestyle="--",
                 color=colors[transition],
@@ -125,14 +130,14 @@ def plot(
             )
         plt.plot(
             x,
-            complex_ramsey_fit(x, *params)[:len(x)],  # Ensure `params` matches the expected parameter count
+            fit_func(x, *params)[:len(x)],  # Ensure `params` matches the expected parameter count
             color=colors[transition],
             label = r"$f_{ground}$ =" +
             rf"{1e9 * total_artificial_detuning + 1e3 * f1_fit + drive_freq:.1f} Hz"
         )
         plt.plot(
             x,
-            complex_ramsey_fit(x, *params)[len(x):],  # Ensure `params` matches the expected parameter count
+            fit_func(x, *params)[len(x):],  # Ensure `params` matches the expected parameter count
             '--',
             color='black',
             alpha = 0.2
@@ -198,12 +203,13 @@ def plot(
 
     return f1_fit, std
 
-def Bootstrap_analysis(time_,x,y,guess,plot=False):
+def Bootstrap_analysis(time_,x,y,guess,fit_func = complex_ramsey_gaussian_fit,plot=False):
     n_bootstrap = 1000
     f1_bootstrapped = []
     N = y.shape[0]
-    fig,axs = plt.subplots(2)
-    fig.tight_layout()
+    if plot:
+        fig,axs = plt.subplots(2)
+        fig.tight_layout()
     time_dense = np.linspace(time_[0],time_[-1],1000)
     x_avg = x.mean(0)
 
@@ -215,7 +221,7 @@ def Bootstrap_analysis(time_,x,y,guess,plot=False):
         z_sampled = np.concatenate([x_sampled, y_sampled])
 
         try:
-            params, _ = curve_fit(complex_ramsey_fit, time_, z_sampled, p0=guess)
+            params, _ = curve_fit(fit_func, time_, z_sampled, p0=guess)
             #delta_f, delta_t, delta_phi1, delta_A, delta_offset
             error = np.abs(params-guess)
             
@@ -225,12 +231,13 @@ def Bootstrap_analysis(time_,x,y,guess,plot=False):
             if (np.sum(error>max_error) == 0):
             
                 f1_bootstrapped.append(params[0]) 
-                axs[0].plot(time_dense,complex_ramsey_fit(time_dense,*params)[:len(time_dense)], alpha=0.1, color='black')
-                axs[0].plot(time_,x_sampled,'x', alpha=0.5, color='black')
-            
+                if plot:
+                    axs[0].plot(time_dense,fit_func(time_dense,*params)[:len(time_dense)], alpha=0.1, color='black')
+                    axs[0].plot(time_,x_sampled,'x', alpha=0.5, color='black')
+                
             else :
-            
-                axs[0].plot(time_dense,complex_ramsey_fit(time_dense,*params)[:len(time_dense)], alpha=0.1, color='blue')
+                if plot:
+                    axs[0].plot(time_dense,fit_func(time_dense,*params)[:len(time_dense)], alpha=0.1, color='blue')
 
         except:
             print('fit failed this is bad..')
@@ -242,9 +249,10 @@ def Bootstrap_analysis(time_,x,y,guess,plot=False):
     f1_bootstrapped = np.array(f1_bootstrapped)
     f1_means = np.mean(f1_bootstrapped)
     f1_std = np.std(f1_bootstrapped)
-    axs[0].set_title(rf'Bootstrap plot of signal std is {f1_std*1e3:.4f} Hz')
 
     if plot:
+        
+        axs[0].set_title(rf'Bootstrap plot of signal std is {f1_std*1e3:.4f} Hz')
         axs[0].set_xlabel('Time (ms)')
         axs[0].set_ylabel('population')
         axs[0].set_ylim(0,1)
@@ -266,7 +274,7 @@ def Bootstrap_analysis(time_,x,y,guess,plot=False):
     return f1_std
 
 def plot_chunked_averages(threshold, transition, n, data_click, time_, meas_time,
-                          n_freq=1,decay_time = 3,
+                          n_freq=1,decay_time = 3,fit_func = complex_ramsey_gaussian_fit,
                           ylim=(-0.2, 1.2), figsize=(12,10)):
     """
     signal: your data dict, uses signal["data_click"][...,0]
@@ -311,7 +319,7 @@ def plot_chunked_averages(threshold, transition, n, data_click, time_, meas_time
     ]
     try:
         # Perform curve fitting with initial guesses
-        global_params, params_covariance = curve_fit(complex_ramsey_fit, time_, Z, p0=guess)
+        global_params, params_covariance = curve_fit(fit_func, time_, Z, p0=guess)
     except Exception as e:
         print("overall Fit failed:", e)
         global_params = guess  # Use initial guess if fit fails
@@ -376,7 +384,7 @@ def plot_chunked_averages(threshold, transition, n, data_click, time_, meas_time
         ax_t.plot(t_fit, fit_real, lw = 3, color=colors[transition], label="fit Re")
         ax_t.plot(t_fit, fit_imag, '--', lw = 3, color=colors[transition], alpha=0.6, label="fit Im")
         ax_t.plot(time_, avg_real, 'o', color=colors[transition], markeredgecolor='k',
-                  label=f"{i*time_per_chunk}h – {(i+1)*time_per_chunk}h")
+                  label=f"{i*time_per_chunk}h - {(i+1)*time_per_chunk}h")
         ax_t.plot(time_, avg_imag, 'o', color='k', alpha=0.3)
         ax_t.set_ylim(*ylim)
         # annotate T2* on the time-domain axis in the top-left corner

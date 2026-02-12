@@ -100,7 +100,10 @@ def load_h5_to_dic(fullpath):
 def complex_ramsey_fit(t,f,T,phi,A,B):
         Z=A*np.exp(1j*(2*np.pi*f*t+phi))*np.exp(-t/T) + B*(1+1j)
         return np.concatenate([np.real(Z),np.imag(Z)])
-    
+
+def complex_ramsey_gaussian_fit(t,f,T,phi,A,B):
+        Z=A*np.exp(1j*(2*np.pi*f*t+phi))*np.real(np.exp(-t**2/T**2)) + B*(1+1j)
+        return np.concatenate([np.real(Z),np.imag(Z)])      
     
 def hyperfine_hamiltonian(A) -> Qobj:
     h = 0 # Hyperfine interaction 

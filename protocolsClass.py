@@ -215,10 +215,6 @@ class Hamiltonian_Fitter():
         plt.tight_layout(rect=[0, 0, 1, 0.95])
         plt.show()
 
-        
-        
-        
-        
     def get_full_q_tensor(self, D, S1, S2, delta, theta):
         cos1 = S1 * np.cos(theta)
         sin1 = S1 * np.sin(theta)
@@ -305,7 +301,6 @@ class Hamiltonian_Fitter():
         # print("QYY[State.Excited.value]:", QYY[State.Excited.value])
 
         plt.show()
-
 
     def Plot_full(self, x, title='Full Fit'):
 
@@ -505,9 +500,10 @@ class Hamiltonian_Fitter():
             print(f"File {filename} not found. Skipping loading full state results.")
 
     def Plot_Best(self):
+        residuals_avg = np.average(np.abs(self.get_log_likelihood_separated(self.best_x[self.state.value])))
         self.plot_levels_and_residuals_separated(
             self.best_x[self.state.value],
-            title='Best X errors'
+            title= rf'Best X errors average residual is {residuals_avg}'
         )
     
     def Plot_Guess(self,guess):
