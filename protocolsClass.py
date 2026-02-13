@@ -42,7 +42,7 @@ Sy = jmat(S, 'y')
 Sz = jmat(S, 'z')
 
 # Define the nuclear spin operators (I = 9/2)
-I = 9/2
+I = 7/2
 Ix = jmat(I, 'x')
 Iy = jmat(I, 'y')
 Iz = jmat(I, 'z')
@@ -53,7 +53,6 @@ class State(Enum):
     Full = "full"
     Heca = "heca"
 
-manu_ramsey_meas = np.array([-134296, -133678, -132898, -131896, -130532, -128697, -125952, -124533, -88889]) * 1e-3 # [kHz]
 
 
 class Hamiltonian_Fitter():
@@ -73,7 +72,7 @@ class Hamiltonian_Fitter():
 
         
         # Lamb shift
-        rel_electron_freq = np.cumsum([0, *manu_ramsey_meas]) # [kHz]
+        rel_electron_freq = np.cumsum([0, *meas]) # [kHz]
         g=5.24            # [kHz]
         kappa=700         # [kHz]
         self.lamb_shift_meas = rel_electron_freq * g**2 / (kappa**2/4 + rel_electron_freq**2) # [kHz]
@@ -109,8 +108,8 @@ class Hamiltonian_Fitter():
         return 0.0
 
     def get_transitions_separated(self, e):
-        ground_transitions = np.diff(e[:10])
-        excited_transitions = np.diff(e[10:] + self.lamb_shift_meas)
+        ground_transitions = np.diff(e[:8])
+        excited_transitions = np.diff(e[8:] + self.lamb_shift_meas)
         return ground_transitions, excited_transitions
 
     def get_log_likelihood_separated(self,x):

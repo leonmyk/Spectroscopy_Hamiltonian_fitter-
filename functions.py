@@ -38,6 +38,7 @@ import json
 # Constants
 mu_Nb = 10.4213  # [kHz / mT]
 mu_Er = - 17_350 # [kHz / mT]
+mu_Ca = - 2.87
 
 # Define the electron spin operators (S = 1/2)
 S = 1/2
@@ -46,10 +47,11 @@ Sy = jmat(S, 'y')
 Sz = jmat(S, 'z')
 
 # Define the nuclear spin operators (I = 9/2)
-I = 9/2
+I = 7/2
 Ix = jmat(I, 'x')
 Iy = jmat(I, 'y')
 Iz = jmat(I, 'z')
+
 
 meas_Aperp = 51.
 meas_Aperp = 48.
@@ -124,7 +126,7 @@ def quadrupole_hamiltonian_param(D, E, Q, delta) -> Qobj:
 def zeeman_hamiltonian(Bz) -> Qobj:
     return -Bz * (
         mu_Er * tensor(Sz, qeye(int(2*I+1))) +
-        mu_Nb * tensor(qeye(2), Iz)
+        mu_Ca * tensor(qeye(2), Iz)
     )
     
 
