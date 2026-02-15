@@ -31,6 +31,7 @@ from functions import get_q_tensor
 from functions import normalise_Histogram_Height
 from functions import pretty_mcmc
 from functions import get_full_q_tensor
+from functions import SpinSystem
 
 # Constants
 mu_Nb = 10.4213  # [kHz / mT]
@@ -58,7 +59,7 @@ class State(Enum):
 
 class Hamiltonian_Fitter():
 
-    def __init__(self, meas, std_meas, state:State,id:str = '00', meas_Aperp:float = None , simu_A:float = None):
+    def __init__(self, meas, std_meas, state:State,system:SpinSystem,id:str, meas_Aperp:float = None , simu_A:float = None):
 
         self.state = state
         self.meas = meas
@@ -70,6 +71,7 @@ class Hamiltonian_Fitter():
         self.meas_Aperp = meas_Aperp
         self.simu_A = simu_A
         self.id = id
+        self.system = system
 
         
         # Lamb shift
@@ -555,9 +557,9 @@ A_simu_Nb = 1e3*np.array([[ 0.43899564,  0.,          0.02076148],
 
 exp_id = '_Ca_meas'
 
-fitter_ground = Hamiltonian_Fitter(ground_meas_Ca,d_ground_meas_Ca,State.Ground,id = exp_id)
-fitter_excited = Hamiltonian_Fitter(ground_meas_Ca + d_manu_ramsey_meas_Ca,d_manu_ramsey_meas_Ca,State.Excited,id = exp_id)
-fitter_full = Hamiltonian_Fitter(full_meas_Ca,d_full_meas_Ca,State.Full, meas_Aperp = A_perp_meas_Ca,simu_A= A_simu_Nb,id = exp_id)
+fitter_ground = Hamiltonian_Fitter(ground_meas_Ca,d_ground_meas_Ca,State.Ground,system=SpinSystem(I=7/2,S=1/2),id = exp_id)
+fitter_excited = Hamiltonian_Fitter(ground_meas_Ca + d_manu_ramsey_meas_Ca,d_manu_ramsey_meas_Ca,State.Excited,system=SpinSystem(I=7/2,S=1/2),id = exp_id)
+fitter_full = Hamiltonian_Fitter(full_meas_Ca,d_full_meas_Ca,State.Full,system=SpinSystem(I=7/2,S=1/2), meas_Aperp = A_perp_meas_Ca,simu_A= A_simu_Nb,id = exp_id)
 fitter_full.Load_results()
 # fitter_ground.Load_results()
 # fitter_ground.Plot_Best()

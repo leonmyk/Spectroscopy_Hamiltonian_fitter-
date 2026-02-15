@@ -40,17 +40,25 @@ mu_Nb = 10.4213  # [kHz / mT]
 mu_Er = - 17_350 # [kHz / mT]
 mu_Ca = - 2.87
 
-# Define the electron spin operators (S = 1/2)
-S = 1/2
-Sx = jmat(S, 'x')
-Sy = jmat(S, 'y')
-Sz = jmat(S, 'z')
+class SpinSystem:
 
-# Define the nuclear spin operators (I = 9/2)
-I = 7/2
-Ix = jmat(I, 'x')
-Iy = jmat(I, 'y')
-Iz = jmat(I, 'z')
+    def __init__(self, S=1/2, I=7/2):
+        self.S = S
+        self.I = I
+
+        # Electron operators
+        self.Sx = jmat(S, 'x')
+        self.Sy = jmat(S, 'y')
+        self.Sz = jmat(S, 'z')
+
+        # Nuclear operators
+        self.Ix = jmat(I, 'x')
+        self.Iy = jmat(I, 'y')
+        self.Iz = jmat(I, 'z')
+
+        self.Id_S = qeye(int(2*S + 1))
+        self.Id_I = qeye(int(2*I + 1))
+
 
 
 meas_Aperp = 51.
@@ -98,7 +106,6 @@ def load_h5_to_dic(fullpath):
                     data_vector[key][d_key]=file[key][d_key][()]
             return data_vector, datasets_keys_list 
         
-        
 def complex_ramsey_fit(t,f,T,phi,A,B):
         Z=A*np.exp(1j*(2*np.pi*f*t+phi))*np.exp(-t/T) + B*(1+1j)
         return np.concatenate([np.real(Z),np.imag(Z)])
@@ -107,29 +114,27 @@ def complex_ramsey_gaussian_fit(t,f,T,phi,A,B):
         Z=A*np.exp(1j*(2*np.pi*f*t+phi))*np.real(np.exp(-t**2/T**2)) + B*(1+1j)
         return np.concatenate([np.real(Z),np.imag(Z)])      
     
-def hyperfine_hamiltonian(A) -> Qobj:
+def hyperfine_hamiltonian(sytem:SpinSystem, A) -> Qobj:
     h = 0 # Hyperfine interaction 
-    for i, s_op in enumerate([Sx, Sy]):
-        for j, i_op in enumerate([Ix, Iy, Iz]):
+    for i, s_op in enumerate([sytem.Sx, sytem.Sy]):
+        for j, i_op in enumerate([sytem.Ix, sytem.Iy, sytem.Iz]):
             h += simu_A[i, j] * tensor(s_op, i_op)
-    return A * tensor(Sz, Iz) + meas_Aperp * tensor(Sz, Ix) + h
+    return A * tensor(sytem.Sz, sytem.Iz) + meas_Aperp * tensor(sytem.Sz, sytem.Ix) + h
 
-
-def quadrupole_hamiltonian_param(D, E, Q, delta) -> Qobj:
+def quadrupole_hamiltonian_param(sytem:SpinSystem, D, E, Q, delta) -> Qobj:
     q_tensor = get_q_tensor(D, E, Q, delta)
     h = 0
-    for i, i1 in enumerate([Ix, Iy, Iz]):
-        for j, i2 in enumerate([Ix, Iy, Iz]):
-            h += q_tensor[i, j] * tensor(qeye(2), i1 * i2)
+    for i, i1 in enumerate([sytem.Ix, sytem.Iy, sytem.Iz]):
+        for j, i2 in enumerate([sytem.Ix, sytem.Iy, sytem.Iz]):
+            h += q_tensor[i, j] * tensor(sytem.Id_S, i1 * i2)
     return h
 
-def zeeman_hamiltonian(Bz) -> Qobj:
+def zeeman_hamiltonian(sytem:SpinSystem, Bz) -> Qobj:
     return -Bz * (
-        mu_Er * tensor(Sz, qeye(int(2*I+1))) +
-        mu_Ca * tensor(qeye(2), Iz)
+        mu_Er * tensor(sytem.Sz, sytem.Id_I) +
+        mu_Ca * tensor(sytem.Id_S, sytem.Iz)
     )
     
-
 def get_q_tensor(D, E, Q, delta):
     c = E * np.cos(2 * delta)
     s = E * np.sin(2 * delta)
@@ -139,7 +144,6 @@ def get_q_tensor(D, E, Q, delta):
         [Q, 0, D]
     ])
     return q_tensor
-
 
 def get_full_q_tensor(D, S1, S2, delta, theta):
     cos1 = S1 * np.cos(theta)
@@ -153,26 +157,23 @@ def get_full_q_tensor(D, S1, S2, delta, theta):
     ])
     return q_tensor
 
-def full_quadrupole_hamiltonian_param(D, S1, S2, delta, theta) -> Qobj:
+def full_quadrupole_hamiltonian_param(sytem:SpinSystem, D, S1, S2, delta, theta) -> Qobj:
     q_tensor = get_full_q_tensor(D, S1, S2, delta, theta)
     h = 0
-    for i, i1 in enumerate([Ix, Iy, Iz]):
-        for j, i2 in enumerate([Ix, Iy, Iz]):
-            h += q_tensor[i, j] * tensor(qeye(2), i1*i2)
+    for i, i1 in enumerate([sytem.Ix, sytem.Iy, sytem.Iz]):
+        for j, i2 in enumerate([sytem.Ix, sytem.Iy, sytem.Iz]):
+            h += q_tensor[i, j] * tensor(sytem.Id_S, i1*i2)
     return h
 
-
 # Define the Hamiltonian
-def Full_hamiltonian(x: np.ndarray) -> Qobj: 
+def Full_hamiltonian(x: np.ndarray, sytem:SpinSystem) -> Qobj: 
     Bz, A, D, S1, S2, delta, alpha, Dz  = x
-    return zeeman_hamiltonian(Bz) +\
-        hyperfine_hamiltonian(A) +\
-        full_quadrupole_hamiltonian_param(D, S1, S2, delta, alpha) +\
+    return zeeman_hamiltonian(sytem,Bz) +\
+        hyperfine_hamiltonian(sytem,A) +\
+        full_quadrupole_hamiltonian_param(sytem,D, S1, S2, delta, alpha) +\
         sdq_hamiltonian_param(Dz) #+\
         #hexadecapole_hamiltonian(Hx)
-
-
-    
+  
 def normalise_Histogram_Height(data1,data2,bins1,bins2):
 
     # choose bins independently (examples)
@@ -227,26 +228,23 @@ def pretty_mcmc(flat_samples, sig_figs=2):
 
     return high_low
 
-    
-def hexadecapole_hamiltonian(Hx) -> Qobj:
-    # Hexadecapole term is not implemented in this context, but can be added similarly
-    return Hx * tensor(Sz, Iz*Iz*Iz*Iz)
+def hexadecapole_hamiltonian(system:SpinSystem,Hx) -> Qobj:
+    return Hx * tensor(system.Sz, system.Iz*system.Iz*system.Iz*system.Iz)
 
-def sdq_hamiltonian_param(Dz) -> Qobj:    
+def sdq_hamiltonian_param(system:SpinSystem,Dz) -> Qobj:    
     q_tensor = get_full_q_tensor(Dz, 0,0,0,0)
     h = 0
-    for i, i1 in enumerate([Ix, Iy, Iz]):
-        for j, i2 in enumerate([Ix, Iy, Iz]):
-            h += q_tensor[i, j] * tensor(Sz, i1*i2)
+    for i, i1 in enumerate([system.Ix, system.Iy, system.Iz]):
+        for j, i2 in enumerate([system.Ix, system.Iy, system.Iz]):
+            h += q_tensor[i, j] * tensor(system.Sz, i1*i2)
     return h
 
-
-def hamiltonian(x: np.ndarray) -> Qobj: 
+def hamiltonian(x: np.ndarray,system:SpinSystem) -> Qobj: 
     Bz, D, E, Q2, Q3  = x
     
-    return zeeman_hamiltonian(Bz) + quadrupole_hamiltonian_param(D, E, Q2, Q3) 
+    return zeeman_hamiltonian(system,Bz) + quadrupole_hamiltonian_param(system,D, E, Q2, Q3) 
 
-def hamiltonian_Heca(x: np.ndarray) -> Qobj: 
+def hamiltonian_Heca(x: np.ndarray,system:SpinSystem) -> Qobj: 
     Bz, D, E, Q2, Q3, Hx  = x
     
-    return zeeman_hamiltonian(Bz) + quadrupole_hamiltonian_param(D, E, Q2, Q3) + hexadecapole_hamiltonian(Hx)
+    return zeeman_hamiltonian(system,Bz) + quadrupole_hamiltonian_param(system,D, E, Q2, Q3) + hexadecapole_hamiltonian(system,Hx)
