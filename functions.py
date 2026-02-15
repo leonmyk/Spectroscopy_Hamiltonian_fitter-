@@ -36,9 +36,16 @@ from scipy.stats import chi2
 import json
 
 # Constants
+h    = 6.6260693e-34       # Plank constant
 mu_Nb = 10.4213  # [kHz / mT]
 mu_Er = - 17_350 # [kHz / mT]
 mu_Ca = - 2.87
+mu_N = 5.0507836991e-27    # Nuclear magneton in J/T
+
+# Niobium-93 nuclear magnetic moment
+gamma_Nb_ref = 6.567400e7/2/np.pi # MHz/T
+mu_Nb_ = gamma_Nb_ref * h  # J/T
+g_Nb = mu_Nb_ / mu_N
 
 class SpinSystem:
 
@@ -570,52 +577,71 @@ def get_rotations(mu1, mu2):
         
     return R_left, R_right
 
-def Plot_hyperFine_for_site(thetas,b0,Crystal_atoms,phi_0 = 0.146 /360*2*np.pi, psi_0 = 0.368 /360*2*np.pi,site_index = 9,Aperp_to_plot=None,Apara_to_plot=None):
+def Plot_hyperFine_for_site(thetas,b0,r,phi_0 = 0.146 /360*2*np.pi, psi_0 = 0.368 /360*2*np.pi,site_index = 9,Aperp_to_plot=None,Apara_to_plot=None,Crystal_atoms = None):
     # fig = visuals[0]
 
-
-    g_Er = gamma_Er / mu_B
     A_paras  = []
     A_perps = []
 
     for theta in thetas :
 
-        bx = b0 * (np.sin(theta) * np.sin(phi_0) - np.cos(theta) * np.sin(psi_0) * np.cos(phi_0))
-        by = b0 * (np.sin(theta) * np.cos(phi_0) + np.cos(theta) * np.sin(psi_0) * np.sin(phi_0))
-        bz = b0 * np.cos(theta) * np.cos(psi_0)
-
-        rotated_b_field = Get_Rotated_B_field((bx, by, bz))
-
-        n_e = _electron_axis(rotated_b_field, g_Er)              # electron axis || g^T B
-        n_n = np.asarray(rotated_b_field, float)
-        Tdd = get_hyperfine_tensor(g_Er, mu_Nb, Crystal_atoms["xyz"][site_index])  # hyperfine tensor in crystal frame
-        R_left, R_right = get_rotations(n_e, n_n)
-        A_p = R_left @ Tdd @ R_right.T   # transpose on the nuclear rotationA_par = R_left @ Tdd @ R_right
-        A_par = A_p[2,2]
-        A_per = np.sqrt(A_p[2,0]**2+A_p[0,2]**2)
+        A_par, A_per,A_p = get_HyperFine(r,b0,theta,phi_0 = 0.146 /360*2*np.pi, psi_0 = 0.368 /360*2*np.pi,n_e= None,n_n=None)
 
         print(f"theta: {theta*180/np.pi:.3f} deg, A_par: {A_par*1e3:.3f} kHz, A_perp: {A_per*1e3:.3f} kHz")
         A_paras.append(A_par)
         A_perps.append(A_per)
 
+    if Crystal_atoms is not None:
+        fig = plt.figure(figsize=(10, 4))
 
-    fig = plt.figure(figsize=(10, 4))
+        ax1 = fig.add_subplot(1, 2, 1, projection="3d")
+        plot_unit_cell(Crystal_atoms, ax=ax1, show_legend=True, cell_mode="centered",highlight_atom_index=site_index)
 
-    ax1 = fig.add_subplot(1, 2, 1, projection="3d")
-    plot_unit_cell(Crystal_atoms, ax=ax1, show_legend=True, cell_mode="centered",highlight_atom_index=site_index)
+        ax2 = fig.add_subplot(1, 2, 2)
+        ax2.plot(thetas,A_perps, label = 'Aperp')
 
-    ax2 = fig.add_subplot(1, 2, 2)
-    ax2.plot(thetas,A_perps, label = 'Aperp')
-    if Apara_to_plot is not None:
-        ax2.scatter(Apara_to_plot[:,0],Apara_to_plot[:,1],label = 'Apara from measurement')
-    if Aperp_to_plot is not None:
-        ax2.scatter(Aperp_to_plot[:,0],Aperp_to_plot[:,1],label = 'Aperp from measurement')
-    ax2.plot(thetas,A_paras, label = 'Apara')
-    ax2.set_xlabel('theta [rad]')
-    ax2.set_ylabel('A [MHz]')
-    ax2.legend()
+        ax2.plot(thetas,A_paras, label = 'Apara')
+        ax2.set_xlabel('theta [rad]')
+        ax2.set_ylabel('A [MHz]')
+        ax2.legend()
+        
+    else :
 
-    plt.tight_layout()
-    plt.show()
+        ax2 = plt.subplot(111)
+        ax2.plot(thetas,A_paras, label = 'Apara')
+        ax2.plot(thetas,A_perps, label = 'Aperp')
+        ax2.set_xlabel('theta [rad]')
+        ax2.set_ylabel('A [MHz]')
+        ax2.legend()
+        if Apara_to_plot is not None:
+            ax2.scatter(Apara_to_plot[:,0],Apara_to_plot[:,1],label = 'Apara from measurement')
+        if Aperp_to_plot is not None:
+            ax2.scatter(Aperp_to_plot[:,0],Aperp_to_plot[:,1],label = 'Aperp from measurement')
 
+        plt.tight_layout()
+        plt.show()
+
+
+
+def get_HyperFine(r,b0,theta,phi_0 = 0.146 /360*2*np.pi, psi_0 = 0.368 /360*2*np.pi,n_e= None,n_n=None):
+
+    g_Er = gamma_Er / mu_B
+
+    bx = b0 * (np.sin(theta) * np.sin(phi_0) - np.cos(theta) * np.sin(psi_0) * np.cos(phi_0))
+    by = b0 * (np.sin(theta) * np.cos(phi_0) + np.cos(theta) * np.sin(psi_0) * np.sin(phi_0))
+    bz = b0 * np.cos(theta) * np.cos(psi_0)
+
+    rotated_b_field = Get_Rotated_B_field((bx, by, bz))
+
+    if n_e is None and n_n is None:
+        n_e = _electron_axis(rotated_b_field, g_Er) # electron axis || g^T B
+        n_n = np.asarray(rotated_b_field, float)
+
+    Tdd = get_hyperfine_tensor(g_Er, mu_Nb_, r)  # hyperfine tensor in crystal frame
+    R_left, R_right = get_rotations(n_e, n_n)
+    A_p = R_left @ Tdd @ R_right.T   # transpose on the nuclear rotationA_par = R_left @ Tdd @ R_right
+    A_par = A_p[2,2]
+    A_per = np.sqrt(A_p[2,0]**2+A_p[0,2]**2)
+
+    return A_par, A_per, A_p
 

@@ -36,6 +36,13 @@ from functions import SpinSystem
 # Constants
 mu_Nb = 10.4213  # [kHz / mT]
 mu_Er = - 17_350 # [kHz / mT]
+mu_N = 5.0507836991e-27    # Nuclear magneton in J/T
+
+
+gamma_Nb_ref = 6.567400e7/2/np.pi # MHz/T
+mu_Nb = gamma_Nb_ref * h  # J/T
+g_Nb = mu_Nb / mu_N
+
 
 # Define the electron spin operators (S = 1/2)
 S = 1/2
