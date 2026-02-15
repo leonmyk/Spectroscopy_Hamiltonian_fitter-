@@ -59,9 +59,8 @@ class State(Enum):
 
 class Hamiltonian_Fitter():
 
-    def __init__(self, meas, std_meas, state:State,system:SpinSystem,id:str, meas_Aperp:float = None , simu_A:float = None):
+    def __init__(self, meas, std_meas,system:SpinSystem,id:str, meas_Aperp:float = None , simu_A:float = None):
 
-        self.state = state
         self.meas = meas
         self.std_meas = std_meas
         self.best_x = {}
@@ -81,12 +80,13 @@ class Hamiltonian_Fitter():
         self.lamb_shift_meas = rel_electron_freq * g**2 / (kappa**2/4 + rel_electron_freq**2) # [kHz]
 
 
-        if self.state == State.Full:
-            self.labels = ["Bz", "A", "D", "S1", "S2", "delta", "alpha", "Dz"]
-        else :
-            self.labels = ["Bz", "D", "E", "F", "delta"]
-
-
+    def _labels(self, state: State):
+        if state == State.Full:
+            return ["Bz", "A", "D", "S1", "S2", "delta", "alpha", "Dz"]
+        else:
+            return ["Bz", "D", "E", "Q", "delta"]
+        
+        return ["Bz", "D", "E", "F", "delta"] # Default case for unknown state
     def log_prior_full(self,x):
         Bz, A, D, S1, S2, delta, alpha, Dz = x
 
@@ -115,26 +115,26 @@ class Hamiltonian_Fitter():
         excited_transitions = np.diff(e[8:] + self.lamb_shift_meas)
         return ground_transitions, excited_transitions
 
-    def get_log_likelihood_separated(self,x):
+    def get_log_likelihood_separated(self,x,state:State):
 
 
-        if self.state == State.Excited :
+        if state == State.Excited :
             h: Qobj = hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             residuals = (excited_transitions - self.meas) / self.std_meas + self.log_prior(x)
 
-        elif self.state == State.Ground :
+        elif state == State.Ground :
             h: Qobj = hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             residuals = (ground_transitions - self.meas) / self.std_meas + self.log_prior(x)
             
-        elif self.state == State.Full :
+        elif state == State.Full :
             h: Qobj = Full_hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             meas_to_compare = np.concatenate((self.meas[:9],self.meas[9:] + self.meas[:9]))
             residuals = (np.concatenate((ground_transitions,excited_transitions)) - meas_to_compare) / self.std_meas
 
-        elif self.state == State.Heca :
+        elif state == State.Heca :
             h: Qobj = hamiltonian_Heca(x)
             ground_transitions, _ = self.get_transitions_separated(h.eigenenergies())
             jaime_energies = np.dif(ground_transitions)
@@ -142,13 +142,16 @@ class Hamiltonian_Fitter():
             residuals = (jaime_energies- self.meas) / self.std_meas
         
 
-        residuals_sum = -0.5 * np.sum(residuals**2)+ self.log_prior_full(x) if self.state == State.Full else -0.5 * np.sum(residuals**2)+ self.log_prior(x)
+        residuals_sum = -0.5 * np.sum(residuals**2)+ self.log_prior_full(x) if state == State.Full else -0.5 * np.sum(residuals**2)+ self.log_prior(x)
         return residuals_sum
 
-    def Get_deriv(self, offset, guess=None, indices_to_plot=[0]):
+    def Get_deriv(self, state:State,offset, guess=None, indices_to_plot=[0]):
 
         if guess == None:
-            guess = self.best_x[self.state.value]
+            try :
+                guess = self.best_x[self.state.value]
+            except :
+                raise ValueError("No guess provided and no best_x found for the current state.")
 
         n_points = 300
         x_list1 = np.array(np.copy(guess))
@@ -158,8 +161,8 @@ class Hamiltonian_Fitter():
         x_list1[0] = x_list1[0] - offset
         x_list2[0] = x_list2[0] + offset
 
-        h1 = Full_hamiltonian(x_list1) if self.state == State.Full else hamiltonian(x_list1)
-        h2 = Full_hamiltonian(x_list2) if self.state == State.Full else hamiltonian(x_list2)
+        h1 = Full_hamiltonian(x_list1) if state == State.Full else hamiltonian(x_list1)
+        h2 = Full_hamiltonian(x_list2) if state == State.Full else hamiltonian(x_list2)
         
         energies1 = np.concatenate(self.get_transitions_separated(h1.eigenenergies()))
         energies2 = np.concatenate(self.get_transitions_separated(h2.eigenenergies()))
@@ -210,7 +213,7 @@ class Hamiltonian_Fitter():
 
         # Global title
         fig.suptitle(
-            f"Spectroscopy around B = {guess[0]:.4f} mT using " + self.state.value + " hamiltonian",
+            f"Spectroscopy around B = {guess[0]:.4f} mT using " + state.value + " hamiltonian",
             fontsize=12
         )
 
@@ -334,9 +337,9 @@ class Hamiltonian_Fitter():
         
         plt.show()
         
-    def plot_levels_and_residuals_separated(self, x, title='',args={}):
+    def plot_levels_and_residuals_separated(self, x,state:State,title='',args={}):
 
-        if self.state == State.Excited :
+        if state == State.Excited :
             h: Qobj = hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             fit = excited_transitions 
@@ -344,7 +347,7 @@ class Hamiltonian_Fitter():
             meas_to_plot = self.meas
 
 
-        elif self.state == State.Ground :
+        elif state == State.Ground :
             h: Qobj = hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             fit = ground_transitions
@@ -367,7 +370,7 @@ class Hamiltonian_Fitter():
         plt.plot(meas_to_plot, 'o', label='Measured')
         plt.plot(fit, 'o', label='fit')
         plt.xlabel('Transition')
-        plt.ylabel(rf'$f_{self.state.value}$ [kHz]')
+        plt.ylabel(rf'$f_{state.value}$ [kHz]')
         plt.legend()
 
         plt.sca(axs[1])
@@ -381,27 +384,27 @@ class Hamiltonian_Fitter():
             linestyle='none'      # no connecting line
         )
         plt.xlabel('Transition')
-        plt.ylabel(rf'res$( f_{self.state.value})$ [Hz]')
+        plt.ylabel(rf'res$( f_{state.value})$ [Hz]')
 
         plt.show()
         
-    def chains(self):
+    def chains(self,state:State):
         # Get the chains from the sampler
         
-        ndim = self.results[self.state.value].shape[1]
+        ndim = self.results[state.value].shape[1]
 
         fig, axes = plt.subplots(ndim, 1, figsize=(10, 2 * ndim), tight_layout=True, sharex=True)
         for i in range(ndim):
             ax = axes[i]
-            ax.plot(self.results[self.state.value][:,i], alpha=0.5,)  # Plot all walkers for parameter i
+            ax.plot(self.results[state.value][:,i], alpha=0.5,)  # Plot all walkers for parameter i
             ax.set_ylabel(self.labels[i])
 
         plt.show()
 
-    def run_MCMC(self, guess,nwalkers=64, nsteps=10000, var = 0.01):
+    def run_MCMC(self, state:State, guess,nwalkers=64, nsteps=10000, var = 0.01):
         
 
-        if self.state == State.Full :
+        if state == State.Full :
             log_likelihood = self.get_log_likelihood_separated  
         else :
             log_likelihood = self.get_log_likelihood_separated
@@ -418,15 +421,15 @@ class Hamiltonian_Fitter():
         samples = sampler.get_chain(discard=500, flat=True)
         idx = sampler.get_log_prob()[500:].argmax()
 
-        self.best_x[self.state.value] = samples[idx]
-        self.median_x[self.state.value] = np.median(samples, axis=0)
-        self.results[self.state.value] = samples
+        self.best_x[state.value] = samples[idx]
+        self.median_x[state.value] = np.median(samples, axis=0)
+        self.results[state.value] = samples
 
-        print("median x : ",self.median_x[self.state.value])
-        print("best x : ",self.best_x[self.state.value])
+        print("median x : ",self.median_x[state.value])
+        print("best x : ",self.best_x[state.value])
 
 
-        values = pretty_mcmc(self.results[self.state.value], sig_figs=2)
+        values = pretty_mcmc(self.results[state.value], sig_figs=2)
         for i in range(len(self.labels)):
             low, central, high = values[i]
             txt = (rf"\mathrm{{{self.labels[i]}}}"
@@ -435,28 +438,28 @@ class Hamiltonian_Fitter():
 
         
         self.plot_levels_and_residuals_separated(
-            self.median_x[self.state.value],
+            self.median_x[state.value],
             title='Median X errors'
         )
 
         return sampler
     
-    def Print_values(self):
-        values = pretty_mcmc(self.results[self.state.value], sig_figs=2)
+    def Print_values(self, state:State):
+        values = pretty_mcmc(self.results[state.value], sig_figs=2)
         for i in range(len(self.labels)):
             low, central, high = values[i]
             txt = (rf"\mathrm{{{self.labels[i]}}}"
                rf" = {central}_{{-{low}}}^{{+{high}}}")
             display(Math(txt))
 
-    def Save_results(self):
+    def Save_results(self,state:State):
         
-        filename = f'mcmc_results_{self.state.value}' + self.id + '.json'
+        filename = f'mcmc_results_{state.value}' + self.id + '.json'
         with open(filename, "w", encoding="utf-8") as f:
             json.dump({
-                "best_x": self.best_x[self.state.value].tolist(),
-                "median_x": self.median_x[self.state.value].tolist(),
-                "results": self.results[self.state.value].tolist()
+                "best_x": self.best_x[state.value].tolist(),
+                "median_x": self.median_x[state.value].tolist(),
+                "results": self.results[state.value].tolist()
             }   , f, indent=4, ensure_ascii=False)
 
     def Load_results(self):
@@ -491,10 +494,10 @@ class Hamiltonian_Fitter():
         except FileNotFoundError:
             print(f"File {filename} not found. Skipping loading full state results.")
 
-    def Plot_Best(self):
-        residuals_avg = np.average(np.abs(self.get_log_likelihood_separated(self.best_x[self.state.value])))
+    def Plot_Best(self,state:State):
+        residuals_avg = np.average(np.abs(self.get_log_likelihood_separated(self.best_x[state.value])))
         self.plot_levels_and_residuals_separated(
-            self.best_x[self.state.value],
+            self.best_x[state.value],
             title= rf'Best X errors average residual is {residuals_avg}'
         )
     
@@ -504,66 +507,73 @@ class Hamiltonian_Fitter():
             title='Best X errors'
         )
 
-    def Plot_corner(self):
-        if self.state == State.Full:
-            labels = ["Bz", "A", "D", "S1", "S2", "delta", "alpha", "Dz"]
-        else :
-            labels = ["Bz", "D", "E", "Q", "delta"]
-        fig = corner.corner(self.results[self.state.value], labels=labels, truths=self.median_x[self.state.value])
+    def Plot_corner(self,state:State):
+
+        fig = corner.corner(self.results[state.value], labels=self._labels(state), truths=self.median_x[state.value])
         plt.show()
 
 
-ground_meas_old_Nb = np.array([7512786.3, 6847127.7, 6180056.7, 5510661.7, 4837199., 4156107.7, 3459061.2, 2730533.1, 1787541.6]) * 1e-3 # [kHz]
-manu_ramsey_meas_old_Nb = np.array([-134296, -133678, -132898, -131896, -130532, -128697, -125952, -124533, -88889]) * 1e-3 # [kHz] previous
-best_x_old =  [
-        449.8217895516637,
-        129.90322492463346,
-        -237.05198836433365,
-        -11.942209580809898,
-        -149.3165679361477,
-        1.5721261153027557,
-        -0.8193213318825887,
-        0.07781602296853966
-    ]
-ground_meas_Nb = np.array([7560562.0 ,6894745.1 ,6227459.8 , 5557759.9 , 4883861.9 ,4202128.8 , 3504133.1, 2774604.8, 1822491.2]) * 1e-3
-manu_ramsey_meas_Nb = np.array([-136547.1, -135922.4, -135196.4, -134203.1, -132831.5, -130986.4, -128470.1, -122551.2, -128756.7])* 1e-3
+def get_rotations(mu1, mu2):
+    """
+    Returns rotation matrices for electron and nuclear spins.
 
-ground_meas_Ca = np.array([997843.4 ,1090793.4 ,1185442.1 ,1281215.1 ,1377750.3 ,1474814.6 ,1572254.3])*1e-3
-manu_ramsey_meas_Ca = np.array([-27703.3,-27670.2,-27594.3,-27518.5,-27449.3,-27376.6,-27349.6])*1e-3
+    Parameters
+    ----------
+    mu1 : array_like
+        Electron magnetic moment vector (arbitrary units).
+    mu2 : array_like
+        Nuclear magnetic moment vector (arbitrary units).
 
-d_ground_meas_Ca = np.array([0.0273, 0.0249, 0.0277, 0.0283, 0.0286, 0.0409, 0.0654])*1e-3# [kHz]
-d_manu_ramsey_meas_Ca = np.array([5.7657,5.5012, 5.8450, 5.3050, 6.7760, 8.1508, 13.7237])*1e-3# [kHz]
-full_meas_Ca = np.concatenate((ground_meas_Ca,manu_ramsey_meas_Ca))
-d_full_meas_Ca = np.concatenate((d_ground_meas_Ca,d_manu_ramsey_meas_Ca))
+    Returns
+    -------
+    R_left : ndarray
+        3x3 rotation matrix for electron spin. Rows are basis vectors [x, y, z].
+    R_right : ndarray
+        3x3 rotation matrix for nuclear spin. Rows are basis vectors [x', y', z'].
+    """
 
+    # Electron spin basis
+    z = mu1 / np.linalg.norm(mu1)                   # z || mu1
+    x = mu2 - np.dot(z, mu2) * z                   # component of mu2 perpendicular to z
+    x /= np.linalg.norm(x)                          # normalize
+    y = np.cross(z, x)                              # completes right-handed basis
 
+    # Nuclear spin basis
+    zp = mu2 / np.linalg.norm(mu2)                 # z' || mu2
+    xp = mu1 - np.dot(zp, mu1) * zp               # component of mu1 perpendicular to zp
+    xp /= np.linalg.norm(xp)                        # normalize
+    yp = np.cross(zp, xp)                           # completes right-handed basis
 
-full_meas_Nb = np.concatenate((ground_meas_Nb,manu_ramsey_meas_Nb))
-full_meas_old_Nb = np.concatenate((ground_meas_old_Nb,manu_ramsey_meas_old_Nb))
+    # Rotation matrices (rows = basis vectors)
+    R_left = np.vstack([x, y, z])
+    R_right = np.vstack([xp, yp, zp])
+    
+    # z_electron = mu1 / np.linalg.norm(mu1)  
+    
+    # y_electron = np.cross(z_electron , (0,0,1))
+    # y_electron = y_electron/ np.linalg.norm(y_electron)  
+    
+    # x_electron =  np.cross(z_electron,y_electron)
+    # x_electron = x_electron/ np.linalg.norm(x_electron)
+  
 
-d_ground_meas_Nb = np.array([0.0002, 0.0002, 0.0002, 0.0002, 0.0002, 0.0001, 0.0002, 0.0002, 0.0002])# [kHz]
-d_manu_ramsey_meas_Nb = np.array([0.0450, 0.0298, 0.0236, 0.0285, 0.0223,  0.0182, 0.0159, 0.0195, 0.0175])# [kHz]
-d_full_meas_Nb = np.concatenate((d_ground_meas_Nb,d_manu_ramsey_meas_Nb))
-A_perp_meas_Nb = 55 # [kHz] | Measured through the Raman Rabi experiment
-A_perp_meas_Ca = 20 # [kHz] | Measured through the Raman Rabi experiment
-A_simu_Nb = np.array([[-436.6,    0.,   -41.3],
-                    [  -0.,  -448.4,    0. ],
-                    [ -88.5,    0.,   129.8]])
+    
+    # print(x_electron)
+    # print(y_electron)
+    # print(z_electron)
 
-A_simu_Nb = 1e3*np.array([[ 0.43899564,  0.,          0.02076148],
-                    [-0.,          0.44172529, -0.        ],
-                    [-0.04857903,  0.,          0.12994526]])
+    # z_nuclear = mu2 / np.linalg.norm(mu2)  
+    # y_nuclear =  np.cross(z_nuclear , (0,0,1))
+    # y_nuclear = y_nuclear/ np.linalg.norm(y_nuclear)  
+    # x_nuclear =  np.cross(z_nuclear, y_nuclear)
+    # x_nuclear = x_nuclear/ np.linalg.norm(x_nuclear)  
 
+    
+    # # Rotation matrices (rows = basis vectors)
+    # R_left = np.vstack([x_electron, y_electron, z_electron])
+    # R_right = np.vstack([x_nuclear, y_nuclear, z_nuclear])
+        
+    return R_left, R_right
 
-exp_id = '_Ca_meas'
-
-fitter_ground = Hamiltonian_Fitter(ground_meas_Ca,d_ground_meas_Ca,State.Ground,system=SpinSystem(I=7/2,S=1/2),id = exp_id)
-fitter_excited = Hamiltonian_Fitter(ground_meas_Ca + d_manu_ramsey_meas_Ca,d_manu_ramsey_meas_Ca,State.Excited,system=SpinSystem(I=7/2,S=1/2),id = exp_id)
-fitter_full = Hamiltonian_Fitter(full_meas_Ca,d_full_meas_Ca,State.Full,system=SpinSystem(I=7/2,S=1/2), meas_Aperp = A_perp_meas_Ca,simu_A= A_simu_Nb,id = exp_id)
-fitter_full.Load_results()
-# fitter_ground.Load_results()
-# fitter_ground.Plot_Best()
-fitter_full.Plot_Quadropole()
-# fitter_full.plot_levels_and_residuals_separated(fitter_full.median_x[State.Ground.value], title='Median X errors')
 
 
