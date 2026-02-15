@@ -30,6 +30,7 @@ from functions import hamiltonian_Heca
 from functions import get_q_tensor
 from functions import normalise_Histogram_Height
 from functions import pretty_mcmc
+from functions import get_full_q_tensor
 
 # Constants
 mu_Nb = 10.4213  # [kHz / mT]
@@ -214,90 +215,80 @@ class Hamiltonian_Fitter():
         plt.tight_layout(rect=[0, 0, 1, 0.95])
         plt.show()
 
-    def get_full_q_tensor(self, D, S1, S2, delta, theta):
-        cos1 = S1 * np.cos(theta)
-        sin1 = S1 * np.sin(theta)
-        cos2 = S2 * np.cos(2 * delta + 2 * theta)
-        sin2 = S2 * np.sin(2 * delta + 2 * theta)
-        q_tensor = np.array([
-            [ -D/2 + cos2,        sin2, cos1],
-            [        sin2, -D/2 - cos2, sin1],
-            [        cos1,        sin1,    D]
-        ])
-        return q_tensor
+    def Plot_Quadropole(self,title='Quadropole Tensor Elements Distribution'):
 
-    def Plot_Quadropole(self):
-
-        fig,axs = plt.subplots(1,3, figsize=(8,6), tight_layout=True,sharey=True)
-        plt.suptitle('Quadropole Tensor Elements Distribution')
-        QXX = {}
-        QYY = {}
-        QZZ = {}
+        fig,axs = plt.subplots(1,3, figsize=(16,12), tight_layout=True,sharey=True)
+        plt.suptitle(title)
+        Q1 = {}
+        Q2 = {}
+        Q3 = {}
 
         for state in [State.Excited,State.Ground]:
 
-            QXX[state.value] = []
-            QYY[state.value] = []
-            QZZ[state.value] = []
+            Q1[state.value] = []
+            Q2[state.value] = []
+            Q3[state.value] = []
 
             for res in self.results[state.value]:
 
                 if state == State.Full :
-                    q_gr_f = self.get_full_q_tensor(res[2] - res[7]/2, res[3], res[4], res[5], res[6])
-                    q_ex_f = self.get_full_q_tensor(res[2] + res[7]/2, res[3], res[4], res[5], res[6])
+                    q_gr_f = get_full_q_tensor(res[2] - res[7]/2, res[3], res[4], res[5], res[6])
+                    q_ex_f = get_full_q_tensor(res[2] + res[7]/2, res[3], res[4], res[5], res[6])
                     vals_gr_f, vals_ex_f = np.linalg.eigvals(q_gr_f), np.linalg.eigvals(q_ex_f)
                     Qz_gr,Qy_gr,Qx_gr = np.sort(vals_gr_f)
                     Qz_ex,Qy_ex,Qx_ex = np.sort(vals_ex_f)
-                    QZZ[state.value].append((Qz_gr, Qz_ex))
-                    QYY[state.value].append((Qy_gr, Qy_ex))
-                    QXX[state.value].append((Qx_gr, Qx_ex))
+                    Q3[state.value].append((Qz_gr, Qz_ex))
+                    Q2[state.value].append((Qy_gr, Qy_ex))
+                    Q1[state.value].append((Qx_gr, Qx_ex))
 
                 else :
                     D, E, Q, delta = res[1], res[2], res[3], res[4]
                     q_tensor = get_q_tensor(D, E, Q, delta)
-                    Qz,Qy,Qx = np.linalg.eigvalsh(q_tensor)
+                    Qz, Qy, Qx = np.linalg.eigvalsh(q_tensor)
+                    Q3[state.value].append(Qz)
+                    Q2[state.value].append(Qy)
+                    Q1[state.value].append(Qx)
 
-                    QZZ[state.value].append(Qz)
-                    QYY[state.value].append(Qy)
-                    QXX[state.value].append(Qx)
+        sorted_index = np.argsort([np.mean(Q3[State.Ground.value]), np.mean(Q2[State.Ground.value]), np.mean(Q1[State.Ground.value])])
+        QZZ, QYY, QXX = [[Q3, Q2, Q1][i] for i in sorted_index[::-1]]
 
-        values = pretty_mcmc(np.array([np.array(QZZ[State.Ground.value]), np.array(QYY[State.Ground.value]), np.array(QXX[State.Ground.value])]).transpose(), sig_figs=2)
-        print(values)
-        QXX_ex_offsets = (QXX[State.Excited.value]-np.mean(QXX[State.Ground.value]))*1e3
-        QXX_gd_offsets = (QXX[State.Ground.value]-np.mean(QXX[State.Ground.value]))*1e3
-        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QXX_ex_offsets,QXX_gd_offsets,120,4)
+        values = pretty_mcmc(np.array([np.array(QZZ[State.Ground.value]), np.array(QYY[State.Ground.value]), np.array(QXX[State.Ground.value])]), sig_figs=2)
+
+        QXX_ex_offsets = (QXX[State.Excited.value]-np.mean(QXX[State.Ground.value]))
+        QXX_gd_offsets = (QXX[State.Ground.value]-np.mean(QXX[State.Ground.value]))
+
+        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QXX_gd_offsets,QXX_ex_offsets,20,120)
         axs[0].bar(e_g, c_g, width=w1, align="edge", alpha=0.4, label="Ground")
         axs[0].bar(e_e, c_e, width=w2, align="edge", alpha=0.4, label="Excited")
         axs[0].set_xlabel(r'$Q_{XX} (Hz)$')
-        axs[0].set_title(rf'${values[0][1]}_{{-{values[0][0]}}}^{{+{values[0][2]}}}$')
-        axs[0].set_xlim(right=100,left=-100)
+        axs[0].set_title(f"{values[2][1]} KHz (-{values[2][0]*1e3} Hz / +{values[2][2]*1e3} Hz)")
+        # axs[0].set_xlim(right=100,left=-100)
         axs[0].set_ylabel('Normalized counts')
 
-        QYY_ex_offsets = (QYY[State.Excited.value]-np.mean(QYY[State.Ground.value]))*1e3
-        QYY_gd_offsets = (QYY[State.Ground.value]-np.mean(QYY[State.Ground.value]))*1e3
-        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QYY_ex_offsets,QYY_gd_offsets,120,4)
+        QYY_ex_offsets = (QYY[State.Excited.value]-np.mean(QYY[State.Ground.value]))
+        QYY_gd_offsets = (QYY[State.Ground.value]-np.mean(QYY[State.Ground.value]))
+        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QYY_gd_offsets*1e3,QYY_ex_offsets*1e3,20,120)
         axs[1].bar(e_g, c_g, width=w1, align="edge", alpha=0.4, label="Ground")
         axs[1].bar(e_e, c_e, width=w2, align="edge", alpha=0.4, label="Excited")
         axs[1].set_xlabel(r'$Q_{YY} (Hz)$')
-        axs[1].set_title(rf'${values[1][1]}_{{-{values[1][0]}}}^{{+{values[1][2]}}}$')
-        axs[1].set_xlim(right=60,left=-100)
+        axs[1].set_title(f"{values[1][1]} KHz (-{values[1][0]*1e3} Hz / +{values[1][2]*1e3} Hz)")   
+        # axs[1].set_xlim(right=500,left=-500)
  
  
  
-        QZZ_ex_offsets = (QZZ[State.Excited.value]-np.mean(QZZ[State.Ground.value]))*1e3
-        QZZ_gd_offsets = (QZZ[State.Ground.value]-np.mean(QZZ[State.Ground.value]))*1e3
-        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QZZ_ex_offsets,QZZ_gd_offsets,80,4)
+        QZZ_ex_offsets = (QZZ[State.Excited.value]-np.mean(QZZ[State.Ground.value]))
+        QZZ_gd_offsets = (QZZ[State.Ground.value]-np.mean(QZZ[State.Ground.value]))
+        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QZZ_gd_offsets*1e3,QZZ_ex_offsets*1e3,20,120)
         axs[2].bar(e_g, c_g, width=w1, align="edge", alpha=0.4, label="Ground")
         axs[2].bar(e_e, c_e, width=w2, align="edge", alpha=0.4, label="Excited")
         axs[2].set_xlabel(r'$Q_{ZZ} (Hz)$')
-        axs[2].set_title(rf'${values[2][1]}_{{-{values[2][0]}}}^{{+{values[2][2]}}}$')
-        axs[2].set_xlim(right=100,left=-40)
+        axs[2].set_title(f"{values[0][1]} KHz (-{values[0][0]*1e3} Hz / +{values[0][2]*1e3} Hz)")
+        # axs[2].set_xlim(right=500,left=-500)
 
         axs[0].legend()
         axs[1].legend()
         axs[2].legend()
 
-        # print("QYY[State.Excited.value]:", QYY[State.Excited.value])
 
         plt.show()
 
@@ -518,4 +509,59 @@ class Hamiltonian_Fitter():
             labels = ["Bz", "D", "E", "Q", "delta"]
         fig = corner.corner(self.results[self.state.value], labels=labels, truths=self.median_x[self.state.value])
         plt.show()
+
+
+ground_meas_old_Nb = np.array([7512786.3, 6847127.7, 6180056.7, 5510661.7, 4837199., 4156107.7, 3459061.2, 2730533.1, 1787541.6]) * 1e-3 # [kHz]
+manu_ramsey_meas_old_Nb = np.array([-134296, -133678, -132898, -131896, -130532, -128697, -125952, -124533, -88889]) * 1e-3 # [kHz] previous
+best_x_old =  [
+        449.8217895516637,
+        129.90322492463346,
+        -237.05198836433365,
+        -11.942209580809898,
+        -149.3165679361477,
+        1.5721261153027557,
+        -0.8193213318825887,
+        0.07781602296853966
+    ]
+ground_meas_Nb = np.array([7560562.0 ,6894745.1 ,6227459.8 , 5557759.9 , 4883861.9 ,4202128.8 , 3504133.1, 2774604.8, 1822491.2]) * 1e-3
+manu_ramsey_meas_Nb = np.array([-136547.1, -135922.4, -135196.4, -134203.1, -132831.5, -130986.4, -128470.1, -122551.2, -128756.7])* 1e-3
+
+ground_meas_Ca = np.array([997843.4 ,1090793.4 ,1185442.1 ,1281215.1 ,1377750.3 ,1474814.6 ,1572254.3])*1e-3
+manu_ramsey_meas_Ca = np.array([-27703.3,-27670.2,-27594.3,-27518.5,-27449.3,-27376.6,-27349.6])*1e-3
+
+d_ground_meas_Ca = np.array([0.0273, 0.0249, 0.0277, 0.0283, 0.0286, 0.0409, 0.0654])*1e-3# [kHz]
+d_manu_ramsey_meas_Ca = np.array([5.7657,5.5012, 5.8450, 5.3050, 6.7760, 8.1508, 13.7237])*1e-3# [kHz]
+full_meas_Ca = np.concatenate((ground_meas_Ca,manu_ramsey_meas_Ca))
+d_full_meas_Ca = np.concatenate((d_ground_meas_Ca,d_manu_ramsey_meas_Ca))
+
+
+
+full_meas_Nb = np.concatenate((ground_meas_Nb,manu_ramsey_meas_Nb))
+full_meas_old_Nb = np.concatenate((ground_meas_old_Nb,manu_ramsey_meas_old_Nb))
+
+d_ground_meas_Nb = np.array([0.0002, 0.0002, 0.0002, 0.0002, 0.0002, 0.0001, 0.0002, 0.0002, 0.0002])# [kHz]
+d_manu_ramsey_meas_Nb = np.array([0.0450, 0.0298, 0.0236, 0.0285, 0.0223,  0.0182, 0.0159, 0.0195, 0.0175])# [kHz]
+d_full_meas_Nb = np.concatenate((d_ground_meas_Nb,d_manu_ramsey_meas_Nb))
+A_perp_meas_Nb = 55 # [kHz] | Measured through the Raman Rabi experiment
+A_perp_meas_Ca = 20 # [kHz] | Measured through the Raman Rabi experiment
+A_simu_Nb = np.array([[-436.6,    0.,   -41.3],
+                    [  -0.,  -448.4,    0. ],
+                    [ -88.5,    0.,   129.8]])
+
+A_simu_Nb = 1e3*np.array([[ 0.43899564,  0.,          0.02076148],
+                    [-0.,          0.44172529, -0.        ],
+                    [-0.04857903,  0.,          0.12994526]])
+
+
+exp_id = '_Ca_meas'
+
+fitter_ground = Hamiltonian_Fitter(ground_meas_Ca,d_ground_meas_Ca,State.Ground,id = exp_id)
+fitter_excited = Hamiltonian_Fitter(ground_meas_Ca + d_manu_ramsey_meas_Ca,d_manu_ramsey_meas_Ca,State.Excited,id = exp_id)
+fitter_full = Hamiltonian_Fitter(full_meas_Ca,d_full_meas_Ca,State.Full, meas_Aperp = A_perp_meas_Ca,simu_A= A_simu_Nb,id = exp_id)
+fitter_full.Load_results()
+# fitter_ground.Load_results()
+# fitter_ground.Plot_Best()
+fitter_full.Plot_Quadropole()
+# fitter_full.plot_levels_and_residuals_separated(fitter_full.median_x[State.Ground.value], title='Median X errors')
+
 

@@ -209,11 +209,11 @@ def pretty_mcmc(flat_samples, sig_figs=2):
     Print median and asymmetric 1-sigma errors with only the
     relevant digits for each parameter.
     """
-    ndim = flat_samples.shape[1]
+    ndim = flat_samples.shape[0]
     high_low = np.zeros((ndim, 3))
 
     for i in range(ndim):
-        p16, p50, p84 = np.percentile(flat_samples[:, i], [16, 50, 84])
+        p16, p50, p84 = np.percentile(flat_samples[i, :], [16, 50, 84])
         q_minus, q_plus = p50 - p16, p84 - p50
         # Use the larger side as a conservative uncertainty
         err = max(q_minus, q_plus)
