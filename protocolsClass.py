@@ -93,7 +93,6 @@ class Hamiltonian_Fitter():
         else:
             return ["Bz", "D", "E", "Q", "delta"]
         
-        return ["Bz", "D", "E", "F", "delta"] # Default case for unknown state
     def log_prior_full(self,x):
         Bz, A, D, S1, S2, delta, alpha, Dz = x
 
@@ -128,12 +127,12 @@ class Hamiltonian_Fitter():
         if state == State.Excited :
             h: Qobj = hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
-            residuals = (excited_transitions - self.meas) / self.std_meas + self.log_prior(x)
+            residuals = (excited_transitions - self.meas[9:]) / self.std_meas[9:] + self.log_prior(x)
 
         elif state == State.Ground :
             h: Qobj = hamiltonian(x)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
-            residuals = (ground_transitions - self.meas) / self.std_meas + self.log_prior(x)
+            residuals = (ground_transitions - self.meas[:9]) / self.std_meas[:9] + self.log_prior(x)
             
         elif state == State.Full :
             h: Qobj = Full_hamiltonian(x)

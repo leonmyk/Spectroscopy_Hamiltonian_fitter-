@@ -37,15 +37,33 @@ import json
 
 # Constants
 h    = 6.6260693e-34       # Plank constant
-mu_Nb = 10.4213  # [kHz / mT]
-mu_Er = - 17_350 # [kHz / mT]
-mu_Ca = - 2.87
 mu_N = 5.0507836991e-27    # Nuclear magneton in J/T
+mu_0 = 12.566370614e-7     # Vacuum permeability
+mu_B = 9.27401007831e-24   # Bohr magneton in J/T
+
+# Er3+ gyromagnetic ratio
+gamma_Er = np.array([117.3, 117.3, 17.45]) * 1e9 * h  # hyperfine coupling constants in Hz/T * h
+g_Er = gamma_Er / mu_B
+g_a, g_b, g_c = g_Er
+mu_Er = - 17_350 # [kHz / mT]
+
+# Tungsten-183 nuclear magnetic moment
+gamma_W_ref = 1.77394e6 # MHz/T
+mu_W = gamma_W_ref * h  # J/T
+g_W = mu_W / mu_N
 
 # Niobium-93 nuclear magnetic moment
 gamma_Nb_ref = 6.567400e7/2/np.pi # MHz/T
 mu_Nb_ = gamma_Nb_ref * h  # J/T
 g_Nb = mu_Nb_ / mu_N
+mu_Nb = 10.4213  # [kHz / mT]
+
+# Calcium-43 nuclear magnetic moment
+gamma_Ca_ref = -2.86899e6          # Hz/T  (=-2.86899 MHz/T)  (43Ca)  :contentReference[oaicite:3]{index=3}
+mu_Ca = gamma_Ca_ref * h           # J/T
+g_Ca  = mu_Ca / mu_N   
+mu_Ca = - 2.87
+
 
 class SpinSystem:
 
@@ -577,17 +595,18 @@ def get_rotations(mu1, mu2):
         
     return R_left, R_right
 
-def Plot_hyperFine_for_site(thetas,b0,r,phi_0 = 0.146 /360*2*np.pi, psi_0 = 0.368 /360*2*np.pi,site_index = 9,Aperp_to_plot=None,Apara_to_plot=None,Crystal_atoms = None):
+# def Plot_hyperFine_for_site(thetas,b0,r,atome:str = None,phi_0 = 0.146 /360*2*np.pi, psi_0 = 0.368 /360*2*np.pi,site_index = 9,Aperp_to_plot=None,Apara_to_plot=None,Crystal_atoms = None):
+def Plot_hyperFine_for_site(thetas,b0,r,atome:str = None,phi_0 = 0. /360*2*np.pi, psi_0 = 0. /360*2*np.pi,site_index = 9,Aperp_to_plot=None,Apara_to_plot=None,Crystal_atoms = None):
     # fig = visuals[0]
-
+    print(phi_0, psi_0)
     A_paras  = []
     A_perps = []
 
     for theta in thetas :
 
-        A_par, A_per,A_p = get_HyperFine(r,b0,theta,phi_0 = 0.146 /360*2*np.pi, psi_0 = 0.368 /360*2*np.pi,n_e= None,n_n=None)
+        A_par, A_per,A_p = get_HyperFine(r,b0,theta,atome=atome,phi_0 = 0.146 /360*2*np.pi, psi_0 = 0.368 /360*2*np.pi,n_e= None,n_n=None)
 
-        print(f"theta: {theta*180/np.pi:.3f} deg, A_par: {A_par*1e3:.3f} kHz, A_perp: {A_per*1e3:.3f} kHz")
+        # print(f"theta: {theta*180/np.pi:.3f} deg, A_par: {A_par*1e3:.3f} kHz, A_perp: {A_per*1e3:.3f} kHz")
         A_paras.append(A_par)
         A_perps.append(A_per)
 
@@ -623,7 +642,7 @@ def Plot_hyperFine_for_site(thetas,b0,r,phi_0 = 0.146 /360*2*np.pi, psi_0 = 0.36
 
 
 
-def get_HyperFine(r,b0,theta,phi_0 = 0.146 /360*2*np.pi, psi_0 = 0.368 /360*2*np.pi,n_e= None,n_n=None):
+def get_HyperFine(r,b0,theta,atome:str = None,phi_0 = 0.146 /360*2*np.pi, psi_0 = 0.368 /360*2*np.pi,n_e= None,n_n=None):
 
     g_Er = gamma_Er / mu_B
 
@@ -637,7 +656,8 @@ def get_HyperFine(r,b0,theta,phi_0 = 0.146 /360*2*np.pi, psi_0 = 0.368 /360*2*np
         n_e = _electron_axis(rotated_b_field, g_Er) # electron axis || g^T B
         n_n = np.asarray(rotated_b_field, float)
 
-    Tdd = get_hyperfine_tensor(g_Er, mu_Nb_, r)  # hyperfine tensor in crystal frame
+    mu = mu_Ca if atome == 'Ca' else mu_Nb if atome == 'Nb' else mu_W
+    Tdd = get_hyperfine_tensor(g_Er, mu, r)  # hyperfine tensor in crystal frame
     R_left, R_right = get_rotations(n_e, n_n)
     A_p = R_left @ Tdd @ R_right.T   # transpose on the nuclear rotationA_par = R_left @ Tdd @ R_right
     A_par = A_p[2,2]
