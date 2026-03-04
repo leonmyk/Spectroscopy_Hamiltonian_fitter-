@@ -15,12 +15,49 @@ from datetime import *
 from matplotlib.collections import LineCollection
 import os, sys
 from functions import complex_ramsey_fit
-from functions import load_h5_to_dic
 from functions import complex_ramsey_gaussian_fit
+from scipy.signal import find_peaks
 
 
 
+def load_h5_to_dic(fullpath):
+    with h5py.File(fullpath, 'r') as file:
+        main_keys = list(file["/"].keys())
+        data_vector = {}
+        if isinstance(file[main_keys[0]], h5py.Dataset):
+            #datasets_keys_list = [main_keys]
+            for key in main_keys:
+                data_vector[key]=file[key][()]
+            return data_vector, main_keys
+        else:
+            datasets_keys_list = {}
+            for j, key in enumerate(main_keys):
+                datasets_keys = list(file[key].keys())
+                datasets_keys_list[key]=list(file[key].keys())
+                data_vector[key]={}
+                for d_key in datasets_keys:
+                    data_vector[key][d_key]=file[key][d_key][()]
+            return data_vector, datasets_keys_list 
 
+
+
+def lorentz(delta, delta0, kappa, a, b):
+    """
+    Lorentzian distribution, the one which is practical for a fit.
+    To be removed and abstracted in fitting classes.
+    """
+    return a / (1 + (delta - delta0) ** 2 / (kappa / 2) ** 2) + b
+
+def make_multi_lorentz(n):
+    # params = [x01,g1,A1,  x02,g2,A2, ..., x0n,gn,An,  C]
+    def f(x, *params):
+        *p, C = params
+        y = np.zeros_like(x, dtype=float)
+        for i in range(n):
+            x0, g, A = p[3*i:3*i+3]
+            y += lorentz(x, x0, g, A, 0.0)
+        return y + C
+    return f
 
 
 def Chunk_Data(signal,chunk_size = None,nb_chunks = None):
@@ -435,3 +472,424 @@ def plot_chunked_averages(threshold, transition, n, data_click, time_, meas_time
     ax2.legend(loc="upper right")
     plt.tight_layout()     
     
+def plotSpectroscopy(
+    signal: dict,
+    threshold,
+    n_peaks=1,
+    experiment_name = "RamanSpectroscopy",
+    avg_slice=slice(None),
+    freq_slice=slice(None),
+    width: float = 0.5    
+):
+    
+    
+    start_i, stop_i, step_i = avg_slice.indices(signal["iteration"])   # step_i will be 1
+    nb_averages_sliced = max(0, stop_i - start_i)
+
+    clicks = signal["clicks"][avg_slice,freq_slice,:,:] #(avg, n_point, NRO, read_outs)
+    iteration = stop_i-start_i
+    freq_list = (signal['freq_list'] * 1e-3)[freq_slice]
+    delta_freq = signal['delta_freq'][freq_slice]
+
+    # --- everything above stays the same up to your plt.subplots(...)
+
+    fig, axs = plt.subplots(2, 2, figsize=(12, 9), tight_layout=True)
+
+    print(clicks.shape)
+    counts = clicks.sum(2)
+    p_down = (counts[:, :, 1] > threshold).mean(0)
+    p_up = (counts[:, :, 0]   > threshold).mean(0)
+    
+    if p_down.mean(0) > p_up.mean(0):
+        p_fit = p_down
+        p_not_fit = p_up
+    else:
+        p_fit = p_up
+        p_not_fit = p_down
+        
+    prominence = 0.02
+    peak_distance =  4
+    p_idx, props = find_peaks(-p_fit, prominence=prominence, distance=peak_distance)
+    # if p_idx.size == 0:
+    #     raise RuntimeError("No peaks found – adjust 'prominence' or 'peak_distance'.")
+
+    if p_idx.size != 0:
+        # Keep only the N most prominent peaks if user requests it
+        if n_peaks is not None and p_idx.size > n_peaks:
+            order = np.argsort(props["prominences"])[::-1]  # descending
+            p_idx = p_idx[order][:n_peaks]
+        
+        
+        
+        max_idxs = p_idx
+        
+        guess =   np.concatenate((np.array([[freq_list[max_idxs[i]] ,width,-abs(np.max(p_fit)- min(p_fit))] for i in range(n_peaks)] ).flatten(), [np.max(p_fit)]))
+        fine = np.linspace(min(freq_list),max(freq_list),len(freq_list)*500)
+        # bounds = [-np.inf,np.inf]*(3*n_peaks+1)
+        # for k in range(n_peaks):
+        #     bounds[2*k] = (min(p_not_fit),max(p_fit))
+        
+        try:
+            
+            fine = np.linspace(min(freq_list),max(freq_list),len(freq_list)*500)
+            est, cov = curve_fit(make_multi_lorentz(n_peaks),freq_list,p_fit,guess)
+            data_fit = make_multi_lorentz(n_peaks)(fine,*est)
+            
+        except Exception as e:
+            print('could not fit')
+            est, std, fine, data_fit = guess, guess, fine, make_multi_lorentz(n_peaks)(fine,*guess)
+
+        n_peaks = (len(est) - 1) // 3
+        peaks = []
+        for k in range(n_peaks):
+            x0, gamma, amp = est[3 * k : 3 + 3 * k]
+            mean = est[-1]
+            peaks.append({"amp": amp, "x0": x0, "gamma": gamma, "fwhm": 2 * gamma, 'mean':mean})
+                
+        # ---- (1) Population vs frequency with fit ----
+        ax = axs[0, 0]
+        
+        for i, pk in enumerate(peaks, start=1):
+            x0 = pk["x0"]
+            ax.axvline(x0, ls="--", alpha=0.3,label = f"Peak {i + 1}: f = {pk['x0']:.3f} Khz")
+            ax.text(
+                x0,
+                0.5,     # 2% above the max for visibility
+                f"Peak {i}",
+                rotation=90,
+                va="bottom",
+                ha="center",
+                fontsize="small",
+                color = "red",
+            )
+            ax.plot(fine, data_fit, "--", color="black", alpha=0.6)
+            
+            fine = np.asarray(fine)
+            data_fit = np.asarray(data_fit)
+
+            
+    else :
+        print("no peaks were found")
+        est = [0]
+        
+
+    state = [r"$|\Downarrow>$", r"$|\Uparrow>$"]
+
+    # ---- (1) Population vs frequency with fit ----
+    ax = axs[0, 0]
+
+    ax.errorbar(
+        freq_list,
+        p_down,
+        np.sqrt(p_down * (1 - p_down) / iteration),
+        label=state[0],
+        color = 'b'
+    )
+    ax.errorbar(
+        freq_list,
+        p_up,
+        np.sqrt(p_up * (1 - p_up) / iteration),
+        label=state[1],
+        color = 'g'
+    )
+
+    ax.set_title(
+        "\n"
+        + f"Peak frequency: {est[0]:.3f} kHz"
+        + f"\nAverages: {iteration:.0f}",
+        fontweight="bold",
+    )
+    ax.set_xlabel(r"Frequency (kHz)")
+    ax.set_ylabel("Population")
+    ax.set_ylim([-0.1, 1.1])
+    # ax.set_xlim([950, 1000])
+    ax.legend()
+
+    # ---- (2) Mean counts vs frequency ----
+    ax = axs[0, 1]
+    for i in range(2):
+        ax.plot(freq_list, counts.mean(0)[:, i], label=state[i])
+    ax.set_title("Mean counts vs frequency", fontweight="bold")
+    ax.set_xlabel(r"Frequency (kHz)")
+    ax.set_ylabel("Counts")
+    ax.legend()
+
+    # # ---------------------------------------------------------------
+    # # Compute FWHM region from the fitted curve (robust & param-free)
+    # # ---------------------------------------------------------------
+
+    # # Center at the maximum of the fitted curve
+    # idx0 = int(np.argmax(data_fit))
+    # f0_fit = float(fine[idx0])          # fitted peak frequency (kHz)
+    # y0 = float(data_fit[idx0])
+
+    # # Estimate "baseline" as the lower envelope of the fit (min of the fitted curve)
+    # y_base = float(np.min(data_fit))
+    # half_level = y_base + 0.5 * (y0 - y_base)
+
+    # # Find left/right half-maximum crossing nearest to the peak
+    # # (search to the left)
+    # i_left = idx0
+    # while i_left > 0 and data_fit[i_left] > half_level:
+    #     i_left -= 1
+    # # linear interpolate for better FWHM
+    # if i_left < idx0:
+    #     xL = np.interp(half_level, [data_fit[i_left], data_fit[i_left+1]], [fine[i_left], fine[i_left+1]])
+    # else:
+    #     xL = fine[0]
+
+    # # (search to the right)
+    # i_right = idx0
+    # n_fine = len(fine)
+    # while i_right < n_fine - 1 and data_fit[i_right] > half_level:
+    #     i_right += 1
+    # if i_right > idx0:
+    #     xR = np.interp(half_level, [data_fit[i_right-1], data_fit[i_right]], [fine[i_right-1], fine[i_right]])
+    # else:
+    #     xR = fine[-1]
+
+    # FWHM = float(xR - xL)
+    # left_edge = f0_fit - 0.5 * FWHM
+    # right_edge = f0_fit + 0.5 * FWHM
+
+    # # Build masks for your discrete sweep points
+    # mask_in = (freq_list >= left_edge) & (freq_list <= right_edge)
+    # mask_out = ~mask_in
+
+    # # Safety checks (avoid empty selections)
+    # if not np.any(mask_in):
+    #     # fall back to nearest point if window is too narrow
+    #     nearest = np.argmin(np.abs(freq_list - f0_fit))
+    #     mask_in = np.zeros_like(freq_list, dtype=bool)
+    #     mask_in[nearest] = True
+    #     mask_out = ~mask_in
+
+    # # ------------------------------
+    # # (3) Histograms: within FWHM
+    # # ------------------------------
+    # ax = axs[1, 0]
+    # # counts shape: (n_iter, n_pts, 2), select freq points by mask_in then flatten
+    # bins = np.arange(0, max(1, int(clicks.shape[1]/2)) + 1, 1)
+
+    # ax.hist(
+    #     counts[:, mask_in, 0].ravel(),
+    #     bins=bins, alpha=0.55, density=True, label=r"$C_\Downarrow$ (in FWHM)"
+    # )
+    # ax.hist(
+    #     counts[:, mask_in, 1].ravel(),
+    #     bins=bins, alpha=0.55, density=True, label=r"$C_\Uparrow$ (in FWHM)"
+    # )
+
+    # ax.set_title(
+    #     f"Histograms within FWHM\n"
+    #     f"center={f0_fit:.3f} kHz, FWHM={FWHM:.3f} kHz, "
+    #     f"N pts in={mask_in.sum()}",
+    #     fontweight="bold",
+    # )
+    # ax.set_xlabel("Counts")
+    # ax.set_ylabel("Density")
+    # ax.legend()
+
+    # # ------------------------------
+    # # (4) Histograms: outside FWHM
+    # # ------------------------------
+    # ax = axs[1, 1]
+    # ax.hist(
+    #     counts[:, mask_out, 0].ravel(),
+    #     bins=bins, alpha=0.55, density=True, label=r"$C_\Downarrow$ (background)"
+    # )
+    # ax.hist(
+    #     counts[:, mask_out, 1].ravel(),
+    #     bins=bins, alpha=0.55, density=True, label=r"$C_\Uparrow$ (background)"
+    # )
+
+    # ax.set_title(
+    #     f"Histograms outside FWHM (background)\nN pts out={mask_out.sum()}",
+    #     fontweight="bold",
+    # )
+    # ax.set_xlabel("Counts")
+    # ax.set_ylabel("Density")
+    # ax.legend()
+    # figures = [fig]
+
+    plt.show()
+
+
+
+    def plotRabi(
+        self,
+        signal: dict,
+        fit: dict,
+        experiment_name="RamanRabi",
+        plot_fig=True,
+        threshold = 45,
+    ):
+        
+        # ---------------- Rabi analysis + plotting ----------------
+        clicks = signal["clicks"]
+        iteration = signal["iteration"]
+
+        # time axis (use your sweep vector directly)
+        t_list = signal['rabi_time_list']   # e.g., in ns/us/s — whatever you used
+        t_list = t_list - t_list.min()                         # start from 0 for fit/FFT robustness
+        delta_freq = signal["delta_freq"]
+        # populations from clicks
+        print(clicks.shape)
+        counts = clicks.sum(2) 
+        ps = []
+        for state in range(len(self.ro_freqs)):
+            ps.append(((counts[:, :, state]> threshold).mean(0)))
+        
+        sorted_idx = np.argsort([np.std(p) for p in ps])
+        p_fit  = ps[sorted_idx[-1]]
+        print(sorted_idx)
+
+    
+        y = p_fit - np.mean(p_fit)
+        N = len(y)
+        win = np.hanning(N)
+        y_w = y * win
+
+        dt = np.median(np.diff(t_list))
+        freqs_fft = np.fft.rfftfreq(N, d=dt)
+        Y = np.fft.rfft(y_w)
+        mag = np.abs(Y)
+
+        if len(mag) > 1:
+            peak_idx = 1 + np.argmax(mag[1:])
+        else:
+            peak_idx = 0
+        f_guess_fft = float(freqs_fft[peak_idx])
+
+
+        a0  = 0.5 * (np.max(p_fit) - np.min(p_fit))
+        c0  = float(np.mean(p_fit))
+        b0  = 0.0
+        t00 = 0.0
+        T0  = 100
+        guess = [f_guess_fft, t00, a0, b0, c0, T0]
+
+        try:
+            est, std, fine, data_fit = fit_function(guess, rabi_decay_fit, t_list, p_fit)
+            f_rabi = float(est[0])
+            t0     = float(est[1])
+
+            phi = -2.0 * np.pi * f_rabi * t0
+            phi = (phi + np.pi) % (2.0 * np.pi) - np.pi
+
+            t_pi  = 1.0 / (2.0 * f_rabi)
+            t_pi2 = 1.0 / (4.0 * f_rabi)
+
+            def principal_time(target_angle):
+                k = np.ceil((2.0 * np.pi * f_rabi * (0.0 - t0) + target_angle) / (2.0 * np.pi)) - 1
+                t = t0 + (target_angle + 2.0 * np.pi * k) / (2.0 * np.pi * f_rabi)
+                if t < 0:
+                    t += 1.0 / f_rabi
+                return float(t)
+            t_pi2_phase = principal_time(np.pi/2)
+            t_pi_phase  = principal_time(np.pi)
+            
+        except Exception as e:
+            print("Rabi fit failed, falling back to FFT freq guess. Error:", e)
+            est = guess
+            std = [np.nan] * len(guess)
+            fine = np.linspace(t_list.min(), t_list.max(), 4 * len(t_list))
+            data_fit = rabi_decay_fit(fine, *est)
+
+
+        fig, axs = plt.subplots(3, 2, figsize=(12, 9), tight_layout=True)
+
+        ax = axs[0, 0]
+        
+        for i,p in enumerate(ps):
+            ax.errorbar(
+                t_list, p, np.sqrt(p * (1 - p) / iteration),
+                linewidth=2, label=i,
+            )
+
+        ax.plot(fine, data_fit, "--", color="black", alpha=0.7, label="Rabi fit")
+
+        ax.set_xlabel("Time (ms)")
+        ax.set_ylabel("Population")
+        ax.set_ylim([-0.01, 1.01])
+        ax.legend()
+
+        # (2) Mean counts vs time
+        ax = axs[0, 1]
+        for i in range(len(self.ro_freqs)):
+            ax.plot(t_list, counts.mean(0)[:, i], label=i)
+        ax.set_title("Mean counts vs time", fontweight="bold")
+        ax.set_xlabel("Time (ms)")
+        ax.set_ylabel("Counts")
+        ax.legend()
+
+        # (3) FFT magnitude spectrum (new)
+        ax = axs[1, 0]
+        ax.plot(freqs_fft, mag, lw=2)
+        if np.isfinite(f_guess_fft):
+            ax.axvline(f_guess_fft, ls="--", color="k", alpha=0.7, label=f"FFT peak ~ {f_guess_fft:.6g}")
+        ax.set_title("FFT of population (windowed)", fontweight="bold")
+        ax.set_xlabel("Frequency (1/time)")
+        ax.set_ylabel("Magnitude (a.u.)")
+        ax.legend()
+
+        # (4) Histograms of counts
+        ax = axs[1, 1]
+        for i in range(2):
+            ax.hist(
+                counts[:, :, i].flatten(),
+                bins=np.arange(0, max(1, self.n_ro_nuclear // 2), 1),
+                alpha=0.5,
+                label=i,
+                density=True,
+            )
+        ax.set_title("Histogram of counts", fontweight="bold")
+        ax.set_xlabel("Counts")
+        ax.set_ylabel("Density")
+        ax.legend()
+        
+        plt.suptitle(
+            self.time_stamp + experiment_name
+            + "\n"
+            + rf"driving at {self.W_raman_freq*1e-3} KHz with amp1: {self.W_raman_relamp1} and amp2: {self.W_raman_relamp2}"
+            + "\n"
+            + (f"Rabi freq: {f_rabi:.6g} (kHz) | "
+            f"pi/2:  {t_pi2_phase:.6g}, "
+            f"pi: {t_pi_phase:.6g}")
+            + f"\nAverages: {iteration:.0f}",
+            fontweight="bold",
+        )
+        
+        #(4) Histograms of counts at max contrast
+        ax = axs[2, 0]
+        index_max_contrast_quad = [np.argmax(np.abs(ps[sorted_idx[0]] - ps[sorted_idx[1]])[:]) for i in range(1)]
+        
+        for i in range(1):
+            ax.hist(
+                counts[:, index_max_contrast_quad, i].flatten(),
+                bins=np.arange(0, max(1, self.n_ro_nuclear // 2), 1),
+                alpha=0.5,
+                label=i,
+                density=True,
+            )
+        # ax.set_title(f"Histogram of counts at max contrast (t={t_list[index_max_contrast_quad]:.2f} ms and {t_list[index_max_contrast_quad]:.2f} ms)", fontweight="bold")
+        ax.set_xlabel("Counts")
+        ax.set_ylabel("Density")
+        ax.legend()
+        
+        
+        # (5) Tracking of frequency shifts
+        ax = axs[2, 1]
+        if self.track:
+            ax.plot(delta_freq, label='delta_freq')
+        ax.set_xlabel('Iteration')
+        ax.set_ylabel('Delta frequency (Hz)')
+        ax.set_title('Tracking of frequency shifts during the experiment')
+
+        plt.show()
+
+        self.save(dataset=signal,
+            figure=fig,
+        )
+
+        return

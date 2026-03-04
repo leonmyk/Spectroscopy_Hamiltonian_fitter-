@@ -33,15 +33,15 @@ from functions import pretty_mcmc
 from functions import get_full_q_tensor
 from functions import SpinSystem
 
-# Constants
-mu_Nb = 10.4213  # [kHz / mT]
-mu_Er = - 17_350 # [kHz / mT]
-mu_N = 5.0507836991e-27    # Nuclear magneton in J/T
+# # Constants
+# mu_Nb = 10.4213  # [kHz / mT]
+# mu_Er = - 17_350 # [kHz / mT]
+# mu_N = 5.0507836991e-27    # Nuclear magneton in J/T
 
 
-gamma_Nb_ref = 6.567400e7/2/np.pi # MHz/T
-mu_Nb = gamma_Nb_ref * h  # J/T
-g_Nb = mu_Nb / mu_N
+# gamma_Nb_ref = 6.567400e7/2/np.pi # MHz/T
+# mu_Nb = gamma_Nb_ref * h  # J/T
+# g_Nb = mu_Nb / mu_N
 
 
 # Define the electron spin operators (S = 1/2)
@@ -78,10 +78,11 @@ class Hamiltonian_Fitter():
         self.simu_A = simu_A
         self.id = id
         self.system = system
+        self.nb_tramsitions = self.system.I*2+1
 
         
         # Lamb shift
-        rel_electron_freq = np.cumsum([0, *meas]) # [kHz]
+        rel_electron_freq = np.cumsum([0, *meas[int(self.system.I*2):]]) # [kHz]
         g=5.24            # [kHz]
         kappa=700         # [kHz]
         self.lamb_shift_meas = rel_electron_freq * g**2 / (kappa**2/4 + rel_electron_freq**2) # [kHz]
@@ -117,31 +118,32 @@ class Hamiltonian_Fitter():
         return 0.0
 
     def get_transitions_separated(self, e):
-        ground_transitions = np.diff(e[:8])
-        excited_transitions = np.diff(e[8:] + self.lamb_shift_meas)
+        ground_transitions = np.diff(e[:int(self.system.I*2+1)])
+        excited_transitions = np.diff(e[int(self.system.I*2+1):] + self.lamb_shift_meas)
         return ground_transitions, excited_transitions
 
     def get_log_likelihood_separated(self,x,state:State):
 
 
         if state == State.Excited :
-            h: Qobj = hamiltonian(x)
+            h: Qobj = hamiltonian(x,self.system)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             residuals = (excited_transitions - self.meas[9:]) / self.std_meas[9:] + self.log_prior(x)
+            
 
         elif state == State.Ground :
-            h: Qobj = hamiltonian(x)
+            h: Qobj = hamiltonian(x,self.system)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             residuals = (ground_transitions - self.meas[:9]) / self.std_meas[:9] + self.log_prior(x)
             
         elif state == State.Full :
-            h: Qobj = Full_hamiltonian(x)
+            h: Qobj = Full_hamiltonian(x,self.system)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             meas_to_compare = np.concatenate((self.meas[:9],self.meas[9:] + self.meas[:9]))
             residuals = (np.concatenate((ground_transitions,excited_transitions)) - meas_to_compare) / self.std_meas
 
         elif state == State.Heca :
-            h: Qobj = hamiltonian_Heca(x)
+            h: Qobj = hamiltonian_Heca(x,self.system)
             ground_transitions, _ = self.get_transitions_separated(h.eigenenergies())
             jaime_energies = np.dif(ground_transitions)
             meas_to_compare = np.concatenate((self.meas[:9],self.meas[9:] + self.meas[:9]))
@@ -167,8 +169,8 @@ class Hamiltonian_Fitter():
         x_list1[0] = x_list1[0] - offset
         x_list2[0] = x_list2[0] + offset
 
-        h1 = Full_hamiltonian(x_list1) if state == State.Full else hamiltonian(x_list1)
-        h2 = Full_hamiltonian(x_list2) if state == State.Full else hamiltonian(x_list2)
+        h1 = Full_hamiltonian(x_list1,self.system) if state == State.Full else hamiltonian(x_list1,self.system)
+        h2 = Full_hamiltonian(x_list2,self.system) if state == State.Full else hamiltonian(x_list2,self.system)
         
         energies1 = np.concatenate(self.get_transitions_separated(h1.eigenenergies()))
         energies2 = np.concatenate(self.get_transitions_separated(h2.eigenenergies()))
@@ -305,7 +307,7 @@ class Hamiltonian_Fitter():
 
     def Plot_full(self, x, title='Full Fit'):
 
-        h: Qobj = Full_hamiltonian(x)
+        h: Qobj = Full_hamiltonian(x,self.system)
         ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
         fit = np.concatenate((ground_transitions,excited_transitions))
         error = (np.concatenate((ground_transitions,excited_transitions - ground_transitions)) - self.meas)
@@ -346,26 +348,26 @@ class Hamiltonian_Fitter():
     def plot_levels_and_residuals_separated(self, x,state:State,title='',args={}):
 
         if state == State.Excited :
-            h: Qobj = hamiltonian(x)
+            h: Qobj = hamiltonian(x,self.system)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             fit = excited_transitions 
-            error = (excited_transitions - self.meas)
+            error = (excited_transitions - self.meas[int(self.system.I*2):])
             meas_to_plot = self.meas
 
 
         elif state == State.Ground :
-            h: Qobj = hamiltonian(x)
+            h: Qobj = hamiltonian(x,self.system)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             fit = ground_transitions
-            error = (ground_transitions - self.meas)
+            error = (ground_transitions - self.meas[:int(self.system.I*2)])
             meas_to_plot = self.meas
 
         else :
-            h: Qobj = Full_hamiltonian(x)
+            h: Qobj = Full_hamiltonian(x,self.system)
             ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
             fit = np.concatenate((ground_transitions,excited_transitions))
             error = (np.concatenate((ground_transitions,excited_transitions - ground_transitions)) - self.meas)
-            meas_to_plot = self.meas + np.concatenate((np.zeros(len(ground_transitions)),self.meas[:9]))
+            meas_to_plot = self.meas + np.concatenate((np.zeros(len(ground_transitions)),self.meas[:int(self.system.I*2)]))
 
         
         
@@ -383,7 +385,7 @@ class Hamiltonian_Fitter():
         plt.errorbar(
             range(len(fit)),
             error * 1e3,
-            yerr=self.std_meas * 1e3 * 2,
+            yerr=self.std_meas[] * 1e3 * 2,
             fmt='x',              # cross marker
             color='black',        # marker color
             ecolor='red',         # error bar color
@@ -501,15 +503,17 @@ class Hamiltonian_Fitter():
             print(f"File {filename} not found. Skipping loading full state results.")
 
     def Plot_Best(self,state:State):
-        residuals_avg = np.average(np.abs(self.get_log_likelihood_separated(self.best_x[state.value])))
+        residuals_avg = np.average(np.abs(self.get_log_likelihood_separated(self.best_x[state.value],state)))
         self.plot_levels_and_residuals_separated(
             self.best_x[state.value],
+            state=state,
             title= rf'Best X errors average residual is {residuals_avg}'
         )
     
-    def Plot_Guess(self,guess):
+    def Plot_Guess(self,guess,state:State):
         self.plot_levels_and_residuals_separated(
             guess,
+            state = state,
             title='Best X errors'
         )
 

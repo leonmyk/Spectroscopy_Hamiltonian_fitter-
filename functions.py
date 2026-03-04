@@ -62,12 +62,11 @@ mu_Nb = 10.4213  # [kHz / mT]
 gamma_Ca_ref = -2.86899e6          # Hz/T  (=-2.86899 MHz/T)  (43Ca)  :contentReference[oaicite:3]{index=3}
 mu_Ca = gamma_Ca_ref * h           # J/T
 g_Ca  = mu_Ca / mu_N   
-mu_Ca = - 2.87
 
 
 class SpinSystem:
 
-    def __init__(self, S=1/2, I=7/2):
+    def __init__(self,mu:str, S=1/2, I=7/2):
         self.S = S
         self.I = I
 
@@ -83,6 +82,14 @@ class SpinSystem:
 
         self.Id_S = qeye(int(2*S + 1))
         self.Id_I = qeye(int(2*I + 1))
+        
+        if mu == "Nb":
+            self.mu = mu_Nb
+        elif mu == "Ca":
+            self.mu = mu_Ca
+            
+        
+        
 
 
 
@@ -311,24 +318,7 @@ def complex_ramsey_fit_n(t, *params):
     # return concatenated real+imag for curve_fit
     return np.concatenate([Z.real, Z.imag])
 
-def load_h5_to_dic(fullpath):
-    with h5py.File(fullpath, 'r') as file:
-        main_keys = list(file["/"].keys())
-        data_vector = {}
-        if isinstance(file[main_keys[0]], h5py.Dataset):
-            #datasets_keys_list = [main_keys]
-            for key in main_keys:
-                data_vector[key]=file[key][()]
-            return data_vector, main_keys
-        else:
-            datasets_keys_list = {}
-            for j, key in enumerate(main_keys):
-                datasets_keys = list(file[key].keys())
-                datasets_keys_list[key]=list(file[key].keys())
-                data_vector[key]={}
-                for d_key in datasets_keys:
-                    data_vector[key][d_key]=file[key][d_key][()]
-            return data_vector, datasets_keys_list 
+
         
 def complex_ramsey_fit(t,f,T,phi,A,B):
         Z=A*np.exp(1j*(2*np.pi*f*t+phi))*np.exp(-t/T) + B*(1+1j)
@@ -356,7 +346,7 @@ def quadrupole_hamiltonian_param(sytem:SpinSystem, D, E, Q, delta) -> Qobj:
 def zeeman_hamiltonian(sytem:SpinSystem, Bz) -> Qobj:
     return -Bz * (
         mu_Er * tensor(sytem.Sz, sytem.Id_I) +
-        mu_Ca * tensor(sytem.Id_S, sytem.Iz)
+        sytem.mu * tensor(sytem.Id_S, sytem.Iz)
     )
     
 def get_q_tensor(D, E, Q, delta):
@@ -517,20 +507,19 @@ def _electron_axis(B_field, g_elec):
     beff = (G.T @ B) if G.shape == (3,3) else (G * B)  # electron axis ∝ g^T · B
     return beff / np.linalg.norm(beff)
 
-def Get_Rotated_B_field(B_field,ay = -0.57 * np.pi / 180, ax = -0.7 * np.pi / 180):
+def Get_Rotated_B_field(B_field,theta):
 
-    def rotmat_xz(theta):
-        return np.array([[np.cos(theta),  0, -np.sin(theta)],
+    def rotmat_xz(angle):
+        return np.array([[np.cos(angle),  0, -np.sin(angle)],
                         [            0,  1,             0],
-                        [np.sin(theta), 0, np.cos(theta)]])
+                        [np.sin(angle), 0, np.cos(angle)]])
 
-    def rotmat_yz(theta):
-        theta = -theta
+    def rotmat_yz(angle):
         return np.array([[1,             0,              0],
-                        [0, np.cos(theta), -np.sin(theta)],
-                        [0, np.sin(theta),  np.cos(theta)]])
+                        [0, np.cos(angle), -np.sin(angle)],
+                        [0, np.sin(angle),  np.cos(angle)]])
 
-    return rotmat_yz(ay) @ rotmat_xz(ax) @ B_field
+    return rotmat_yz(0.57 * np.pi / 180) @ rotmat_xz((theta) ) @ B_field
 
 
 def get_rotations(mu1, mu2):
@@ -604,11 +593,14 @@ def Plot_hyperFine_for_site(thetas,b0,r,atome:str = None,phi_0 = 0. /360*2*np.pi
 
     for theta in thetas :
 
-        A_par, A_per,A_p = get_HyperFine(r,b0,theta,atome=atome,phi_0 = 0.146 /360*2*np.pi, psi_0 = 0.368 /360*2*np.pi,n_e= None,n_n=None)
+        A_par, A_per,A_p = get_HyperFine(r,b0,theta,atome=atome,n_e= None,n_n=None)
 
         # print(f"theta: {theta*180/np.pi:.3f} deg, A_par: {A_par*1e3:.3f} kHz, A_perp: {A_per*1e3:.3f} kHz")
         A_paras.append(A_par)
         A_perps.append(A_per)
+    
+    A_paras = np.array(A_paras)
+    A_perps = np.array(A_perps)
 
     if Crystal_atoms is not None:
         fig = plt.figure(figsize=(10, 4))
@@ -617,20 +609,20 @@ def Plot_hyperFine_for_site(thetas,b0,r,atome:str = None,phi_0 = 0. /360*2*np.pi
         plot_unit_cell(Crystal_atoms, ax=ax1, show_legend=True, cell_mode="centered",highlight_atom_index=site_index)
 
         ax2 = fig.add_subplot(1, 2, 2)
-        ax2.plot(thetas,A_perps, label = 'Aperp')
+        ax2.plot(thetas*180/np.pi,A_perps*1e3, label = 'Aperp')
 
-        ax2.plot(thetas,A_paras, label = 'Apara')
-        ax2.set_xlabel('theta [rad]')
-        ax2.set_ylabel('A [MHz]')
+        ax2.plot(thetas*180/np.pi,A_paras*1e3, label = 'Apara')
+        ax2.set_xlabel('theta [deg]')
+        ax2.set_ylabel('A [KHz]')
         ax2.legend()
         
     else :
 
         ax2 = plt.subplot(111)
-        ax2.plot(thetas,A_paras, label = 'Apara')
-        ax2.plot(thetas,A_perps, label = 'Aperp')
-        ax2.set_xlabel('theta [rad]')
-        ax2.set_ylabel('A [MHz]')
+        ax2.plot(thetas*180/np.pi,A_paras*1e3, label = 'Apara')
+        ax2.plot(thetas*180/np.pi,A_perps*1e3, label = 'Aperp')
+        ax2.set_xlabel('theta [deg]')
+        ax2.set_ylabel('A [KHz]')
         ax2.legend()
         if Apara_to_plot is not None:
             ax2.scatter(Apara_to_plot[:,0],Apara_to_plot[:,1],label = 'Apara from measurement')
@@ -642,15 +634,14 @@ def Plot_hyperFine_for_site(thetas,b0,r,atome:str = None,phi_0 = 0. /360*2*np.pi
 
 
 
-def get_HyperFine(r,b0,theta,atome:str = None,phi_0 = 0.146 /360*2*np.pi, psi_0 = 0.368 /360*2*np.pi,n_e= None,n_n=None):
+def get_HyperFine(r,b0,theta,atome:str = None,n_e= None,n_n=None):
 
     g_Er = gamma_Er / mu_B
 
-    bx = b0 * (np.sin(theta) * np.sin(phi_0) - np.cos(theta) * np.sin(psi_0) * np.cos(phi_0))
-    by = b0 * (np.sin(theta) * np.cos(phi_0) + np.cos(theta) * np.sin(psi_0) * np.sin(phi_0))
-    bz = b0 * np.cos(theta) * np.cos(psi_0)
-
-    rotated_b_field = Get_Rotated_B_field((bx, by, bz))
+    bx = 0
+    by = 0
+    
+    rotated_b_field = Get_Rotated_B_field((bx, by, b0),theta)
 
     if n_e is None and n_n is None:
         n_e = _electron_axis(rotated_b_field, g_Er) # electron axis || g^T B
@@ -661,7 +652,7 @@ def get_HyperFine(r,b0,theta,atome:str = None,phi_0 = 0.146 /360*2*np.pi, psi_0 
     R_left, R_right = get_rotations(n_e, n_n)
     A_p = R_left @ Tdd @ R_right.T   # transpose on the nuclear rotationA_par = R_left @ Tdd @ R_right
     A_par = A_p[2,2]
-    A_per = np.sqrt(A_p[2,0]**2+A_p[0,2]**2)
+    A_per = np.sqrt(A_p[2,0]**2+A_p[2,1]**2)
 
     return A_par, A_per, A_p
 
