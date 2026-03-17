@@ -385,7 +385,7 @@ def Full_hamiltonian(x: np.ndarray, sytem:SpinSystem) -> Qobj:
     return zeeman_hamiltonian(sytem,Bz) +\
         hyperfine_hamiltonian(sytem,A) +\
         full_quadrupole_hamiltonian_param(sytem,D, S1, S2, delta, alpha) +\
-        sdq_hamiltonian_param(Dz) #+\
+        sdq_hamiltonian_param(sytem,Dz) #+\
         #hexadecapole_hamiltonian(Hx)
   
 def normalise_Histogram_Height(data1,data2,bins1,bins2):
