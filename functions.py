@@ -70,6 +70,9 @@ class SpinSystem:
         self.S = S
         self.I = I
 
+        self.gamma_Er = np.array([117.3, 117.3, 17.45]) * 1e9 * h  # hyperfine coupling constants in Hz/T * h
+        self.g_Er = gamma_Er / mu_B
+
         # Electron operators
         self.Sx = jmat(S, 'x')
         self.Sy = jmat(S, 'y')
@@ -387,6 +390,44 @@ def Full_hamiltonian(x: np.ndarray, sytem:SpinSystem) -> Qobj:
         full_quadrupole_hamiltonian_param(sytem,D, S1, S2, delta, alpha) +\
         sdq_hamiltonian_param(sytem,Dz) #+\
         #hexadecapole_hamiltonian(Hx)
+
+
+def Full_hamiltonian_V2(x: np.ndarray, sytem:SpinSystem) -> Qobj: 
+    B, A, D, S1, S2, delta, alpha, Dz  = x
+    return zeeman_hamiltonian_V2(sytem,B) +\
+        hyperfine_hamiltonian(sytem,A) +\
+        full_quadrupole_hamiltonian_param(sytem,D, S1, S2, delta, alpha) +\
+        sdq_hamiltonian_param(sytem,Dz) #+\
+
+
+def Get_nuc_to_elec_rotation(elec_g_tensor,B):
+
+    ez = elec_g_tensor@B/np.norm(elec_g_tensor@B)
+    ex = np.cross(ez,B)/np.norm(np.cross(ez,B))
+    ey = np.cross(ez,ex)
+
+    rotation_matrix = np.vstack((ex,ey,ez))
+
+    return rotation_matrix
+
+
+def zeeman_hamiltonian_V2(sytem: SpinSystem, B) -> Qobj:
+
+    R = Get_nuc_to_elec_rotation(sytem.g_Er, B)
+    Beff = R @ (sytem.g_Er @ B)
+    Beffz = np.linalg.norm(Beff)
+
+    B_rot = R @ B  # rotated field vector, shape (3,)
+
+    elec_term = -Beffz * mu_B * tensor(sytem.Sz, sytem.Id_I)
+
+    nuc_term = -sytem.mu * sum(
+        Bi * tensor(sytem.Id_S, Ii)
+        for Bi, Ii in zip(B_rot, [sytem.Ix, sytem.Iy, sytem.Iz])
+    )
+
+    return elec_term + nuc_term
+    
   
 def normalise_Histogram_Height(data1,data2,bins1,bins2):
 
