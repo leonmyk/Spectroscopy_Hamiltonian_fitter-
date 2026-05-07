@@ -61,7 +61,8 @@ mu_Nb = 10.4213  # [kHz / mT]
 # Calcium-43 nuclear magnetic moment
 gamma_Ca_ref = -2.86899e6          # Hz/T  (=-2.86899 MHz/T)  (43Ca)  :contentReference[oaicite:3]{index=3}
 mu_Ca = gamma_Ca_ref * h           # J/T
-g_Ca  = mu_Ca / mu_N   
+g_Ca  = mu_Ca / mu_N
+mu_Ca = -2.86899 #[kHz / mT]
 
 
 class SpinSystem:
@@ -85,6 +86,18 @@ class SpinSystem:
 
         self.Id_S = qeye(int(2*S + 1))
         self.Id_I = qeye(int(2*I + 1))
+
+        self.S_ops = np.array([
+            tensor(self.Sx, self.Id_I),
+            tensor(self.Sy, self.Id_I),
+            tensor(self.Sz, self.Id_I)
+        ])
+
+        self.I_ops = np.array([
+            tensor(self.Id_S, self.Ix),
+            tensor(self.Id_S, self.Iy),
+            tensor(self.Id_S, self.Iz)
+        ])
         
         if mu == "Nb":
             self.mu = mu_Nb
@@ -96,8 +109,12 @@ class SpinSystem:
 
 
 
-meas_Aperp = 51.
-meas_Aperp = 48.
+# meas_Aperp = 51.
+# meas_Aperp = 20.
+
+# meas_Aperp = 51.
+# meas_Aperp = 48.
+
 
 h    = 6.6260693e-34       # Plank constant
 mu_0 = 12.566370614e-7     # Vacuum permeability
@@ -331,7 +348,14 @@ def complex_ramsey_gaussian_fit(t,f,T,phi,A,B):
         Z=A*np.exp(1j*(2*np.pi*f*t+phi))*np.real(np.exp(-t**2/T**2)) + B*(1+1j)
         return np.concatenate([np.real(Z),np.imag(Z)])      
     
-def hyperfine_hamiltonian(sytem:SpinSystem, A) -> Qobj:
+def hyperfine_hamiltonian(sytem:SpinSystem, A, meas_Aperp) -> Qobj:
+    h = 0 # Hyperfine interaction 
+    for i, s_op in enumerate([sytem.Sx, sytem.Sy]):
+        for j, i_op in enumerate([sytem.Ix, sytem.Iy, sytem.Iz]):
+            h += simu_A[i, j] * tensor(s_op, i_op)
+    return A * tensor(sytem.Sz, sytem.Iz) + meas_Aperp * tensor(sytem.Sz, sytem.Ix) + h
+
+def hyperfine_hamiltonian_vectorized(sytem:SpinSystem, A, meas_Aperp) -> Qobj:
     h = 0 # Hyperfine interaction 
     for i, s_op in enumerate([sytem.Sx, sytem.Sy]):
         for j, i_op in enumerate([sytem.Ix, sytem.Iy, sytem.Iz]):
@@ -347,9 +371,15 @@ def quadrupole_hamiltonian_param(sytem:SpinSystem, D, E, Q, delta) -> Qobj:
     return h
 
 def zeeman_hamiltonian(sytem:SpinSystem, Bz) -> Qobj:
-    return -Bz * (
+    return -np.sign(sytem.mu)*Bz * (
         mu_Er * tensor(sytem.Sz, sytem.Id_I) +
         sytem.mu * tensor(sytem.Id_S, sytem.Iz)
+    )
+
+def zeeman_hamiltonian_vectorized(system:SpinSystem, B) -> Qobj:
+    return -np.sign(system.mu)*B * (
+        g_Er * system.S_ops +
+        system.mu * system.I_ops
     )
     
 def get_q_tensor(D, E, Q, delta):
@@ -358,7 +388,7 @@ def get_q_tensor(D, E, Q, delta):
     q_tensor = np.array([
         [-D/2 + c,  s, Q],
         [s, -D/2 - c, 0],
-        [Q, 0, D]
+        [Q,     0,    D]
     ])
     return q_tensor
 
@@ -380,13 +410,14 @@ def full_quadrupole_hamiltonian_param(sytem:SpinSystem, D, S1, S2, delta, theta)
     for i, i1 in enumerate([sytem.Ix, sytem.Iy, sytem.Iz]):
         for j, i2 in enumerate([sytem.Ix, sytem.Iy, sytem.Iz]):
             h += q_tensor[i, j] * tensor(sytem.Id_S, i1*i2)
+    print(q_tensor)
     return h
 
 # Define the Hamiltonian
-def Full_hamiltonian(x: np.ndarray, sytem:SpinSystem) -> Qobj: 
-    Bz, A, D, S1, S2, delta, alpha, Dz  = x
+def Full_hamiltonian(x: np.ndarray, sytem:SpinSystem,meas_Aperp) -> Qobj: 
+    Bz, A, D, S1, S2, delta, alpha, Dz , meas_Aperp = x
     return zeeman_hamiltonian(sytem,Bz) +\
-        hyperfine_hamiltonian(sytem,A) +\
+        hyperfine_hamiltonian(sytem,A,meas_Aperp) +\
         full_quadrupole_hamiltonian_param(sytem,D, S1, S2, delta, alpha) +\
         sdq_hamiltonian_param(sytem,Dz) #+\
         #hexadecapole_hamiltonian(Hx)
@@ -447,41 +478,40 @@ def normalise_Histogram_Height(data1,data2,bins1,bins2):
     return (e1[:-1], c1, w1),(e2[:-1], c2, w2)
 
 def _sig_decimals(err, sig_figs=2):
-    """
-    Return the number of decimals needed to keep `sig_figs`
-    significant figures of an uncertainty `err`.
-
-    Example:
-    err = 0.0123  -> 3  (0.012 shown with 2 s.f.)
-    err = 3.4     -> -1 ( 3  shown with 2 s.f.)
-    """
     if err == 0:
         return 0
-    exponent = int(np.floor(np.log10(err)))
+    exponent = int(np.floor(np.log10(abs(err))))
     return max(0, sig_figs - 1 - exponent)
 
-def pretty_mcmc(flat_samples, sig_figs=2):
+
+def pretty_mcmc(flat_samples, sig_figs=2, central_scale=1.0, err_scale=1.0):
     """
-    Print median and asymmetric 1-sigma errors with only the
-    relevant digits for each parameter.
+    Returns a list of formatted strings:
+    [low_err_str, central_str, high_err_str]
+    for each parameter.
+
+    central_scale: multiply median by this before formatting
+    err_scale: multiply uncertainties by this before formatting
     """
     ndim = flat_samples.shape[0]
-    high_low = np.zeros((ndim, 3))
+    out = []
 
     for i in range(ndim):
         p16, p50, p84 = np.percentile(flat_samples[i, :], [16, 50, 84])
         q_minus, q_plus = p50 - p16, p84 - p50
-        # Use the larger side as a conservative uncertainty
-        err = max(q_minus, q_plus)
+
+        # choose decimals from the larger uncertainty after scaling
+        err = max(q_minus, q_plus) * err_scale
         ndp = _sig_decimals(err, sig_figs)
-
         fmt = f"{{:.{ndp}f}}"
-        central = fmt.format(p50)
-        low    = fmt.format(q_minus)
-        high   = fmt.format(q_plus)
-        high_low[i] = [low, central,high]
 
-    return high_low
+        out.append([
+            fmt.format(q_minus * err_scale),
+            fmt.format(p50 * central_scale),
+            fmt.format(q_plus * err_scale),
+        ])
+
+    return out
 
 def hexadecapole_hamiltonian(system:SpinSystem,Hx) -> Qobj:
     return Hx * tensor(system.Sz, system.Iz*system.Iz*system.Iz*system.Iz)
