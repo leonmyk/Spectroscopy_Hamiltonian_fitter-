@@ -74,6 +74,7 @@ class Hamiltonian_Fitter():
         self.best_x = {}
         self.median_x = {}
         self.results = {}
+        self.discarded = {}
         self.sampler = None
         self.meas_Aperp = meas_Aperp
         self.simu_A = simu_A
@@ -113,11 +114,11 @@ class Hamiltonian_Fitter():
         x_list1[0] = x_list1[0] - offset
         x_list2[0] = x_list2[0] + offset
 
-        h1 = Full_hamiltonian(x_list1,self.system) if state == State.Full else hamiltonian(x_list1,self.system)
-        h2 = Full_hamiltonian(x_list2,self.system) if state == State.Full else hamiltonian(x_list2,self.system)
+        h1 = Full_hamiltonian(x_list1,self.system,self.meas_Aperp) if state == State.Full else hamiltonian(x_list1,self.system)
+        h2 = Full_hamiltonian(x_list2,self.system,self.meas_Aperp) if state == State.Full else hamiltonian(x_list2,self.system)
         
-        energies1 = np.concatenate(self.get_transitions_separated(h1.eigenenergies()))
-        energies2 = np.concatenate(self.get_transitions_separated(h2.eigenenergies()))
+        energies1 = np.concatenate(get_transitions_separated(self.system,h1.eigenenergies()))
+        energies2 = np.concatenate(get_transitions_separated(self.system,h2.eigenenergies()))
 
         gradients = (energies2-energies1)/(2*offset)
 
@@ -174,7 +175,15 @@ class Hamiltonian_Fitter():
 
     def Plot_Quadropole(self,title='Quadropole Tensor Elements Distribution'):
 
-        fig,axs = plt.subplots(1,3, figsize=(16,12), tight_layout=True,sharey=True)
+        fig,axs = plt.subplots(1,3, figsize=(8,4), tight_layout=True,sharey=True)
+        
+        for ax in axs:
+            for spine in ax.spines.values():
+                spine.set_linewidth(2)
+
+            ax.tick_params(width=2, length=6 ,labelsize = 12)
+        
+        
         plt.suptitle(title)
         Q1 = {}
         Q2 = {}
@@ -209,85 +218,257 @@ class Hamiltonian_Fitter():
         sorted_index = np.argsort([np.mean(Q3[State.Ground.value]), np.mean(Q2[State.Ground.value]), np.mean(Q1[State.Ground.value])])
         QZZ, QYY, QXX = [[Q3, Q2, Q1][i] for i in sorted_index[::-1]]
 
-        values = pretty_mcmc(np.array([np.array(QZZ[State.Ground.value]), np.array(QYY[State.Ground.value]), np.array(QXX[State.Ground.value])]), sig_figs=2)
-
+        values = pretty_mcmc(
+            np.array([
+                np.array(QZZ[State.Ground.value]),
+                np.array(QYY[State.Ground.value]),
+                np.array(QXX[State.Ground.value]),
+            ]),
+            sig_figs=2,
+            central_scale=1.0,   # keep central as kHz if your samples are already in kHz
+            err_scale=1e3        # convert uncertainty to Hz
+        )
+        
         QXX_ex_offsets = (QXX[State.Excited.value]-np.mean(QXX[State.Ground.value]))
         QXX_gd_offsets = (QXX[State.Ground.value]-np.mean(QXX[State.Ground.value]))
 
-        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QXX_gd_offsets,QXX_ex_offsets,20,120)
-        axs[0].bar(e_g, c_g, width=w1, align="edge", alpha=0.4, label="Ground")
-        axs[0].bar(e_e, c_e, width=w2, align="edge", alpha=0.4, label="Excited")
-        axs[0].set_xlabel(r'$Q_{XX} (Hz)$')
-        axs[0].set_title(f"{values[2][1]} KHz (-{values[2][0]*1e3} Hz / +{values[2][2]*1e3} Hz)")
+        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QXX_gd_offsets*1e3,QXX_ex_offsets*1e3,40,120)
+        axs[0].bar(e_e, c_e, width=w2, align="edge", alpha=1, label="Excited")
+        axs[0].bar(e_g, c_g, width=w1, align="edge", alpha=1, label="Ground")
+        axs[0].set_xlabel(r'$Q_{XX} (Hz)$',fontsize = 14,fontweight = 'bold')
         # axs[0].set_xlim(right=100,left=-100)
-        axs[0].set_ylabel('Normalized counts')
+        axs[0].set_ylabel('Normalized counts',fontsize = 14,fontweight = 'bold')
 
         QYY_ex_offsets = (QYY[State.Excited.value]-np.mean(QYY[State.Ground.value]))
         QYY_gd_offsets = (QYY[State.Ground.value]-np.mean(QYY[State.Ground.value]))
-        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QYY_gd_offsets*1e3,QYY_ex_offsets*1e3,20,120)
-        axs[1].bar(e_g, c_g, width=w1, align="edge", alpha=0.4, label="Ground")
-        axs[1].bar(e_e, c_e, width=w2, align="edge", alpha=0.4, label="Excited")
-        axs[1].set_xlabel(r'$Q_{YY} (Hz)$')
-        axs[1].set_title(f"{values[1][1]} KHz (-{values[1][0]*1e3} Hz / +{values[1][2]*1e3} Hz)")   
+        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QYY_gd_offsets*1e3,QYY_ex_offsets*1e3,40,120)
+        axs[1].bar(e_e, c_e, width=w2, align="edge", alpha=1, label="Excited")
+        axs[1].bar(e_g, c_g, width=w1, align="edge", alpha=1, label="Ground")
+        axs[1].set_xlabel(r'$Q_{YY} (Hz)$',fontsize = 14,fontweight = 'bold')
         # axs[1].set_xlim(right=500,left=-500)
  
  
  
         QZZ_ex_offsets = (QZZ[State.Excited.value]-np.mean(QZZ[State.Ground.value]))
         QZZ_gd_offsets = (QZZ[State.Ground.value]-np.mean(QZZ[State.Ground.value]))
-        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QZZ_gd_offsets*1e3,QZZ_ex_offsets*1e3,20,120)
-        axs[2].bar(e_g, c_g, width=w1, align="edge", alpha=0.4, label="Ground")
-        axs[2].bar(e_e, c_e, width=w2, align="edge", alpha=0.4, label="Excited")
-        axs[2].set_xlabel(r'$Q_{ZZ} (Hz)$')
-        axs[2].set_title(f"{values[0][1]} KHz (-{values[0][0]*1e3} Hz / +{values[0][2]*1e3} Hz)")
+        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QZZ_gd_offsets*1e3,QZZ_ex_offsets*1e3,1,120)
+        axs[2].bar(e_e, c_e, width=w2, align="edge", alpha=1, label="Excited")
+        axs[2].bar(e_g, c_g, width=w1, align="edge", alpha=1, label="Ground")
+        axs[2].set_xlabel(r'$Q_{ZZ} (Hz)$',fontsize = 14,fontweight = 'bold')
         # axs[2].set_xlim(right=500,left=-500)
 
-        axs[0].legend()
-        axs[1].legend()
-        axs[2].legend()
+        
+        axs[0].set_title(f"{values[2][1]} KHz \n (-{values[2][0]} Hz / +{values[2][2]} Hz)",fontsize = 10,fontweight = 'bold')
+        axs[1].set_title(f"{values[1][1]} KHz \n (-{values[1][0]} Hz / +{values[1][2]} Hz)",fontsize = 10,fontweight = 'bold')
+        axs[2].set_title(f"{values[0][1]} KHz \n (-{values[0][0]} Hz / +{values[0][2]} Hz)",fontsize = 10,fontweight = 'bold')
+        
+        axs[0].legend(fancybox=True,frameon=True,facecolor='lightgrey',edgecolor='grey',framealpha=1)
+        axs[1].legend(fancybox=True,frameon=True,facecolor='lightgrey',edgecolor='grey',framealpha=1)
+        axs[2].legend(fancybox=True,frameon=True,facecolor='lightgrey',edgecolor='grey',framealpha=1)
 
+        plt.show()
+        
+    def Plot_Quadropole2(self,title='Quadropole Tensor Elements Distribution'):
+
+        fig,axs = plt.subplots(1,3, figsize=(8,4), tight_layout=True,sharey=True)
+        
+        for ax in axs:
+            for spine in ax.spines.values():
+                spine.set_linewidth(2)
+
+            ax.tick_params(width=2, length=6 ,labelsize = 12)
+        
+        
+        plt.suptitle(title)
+        Q1 = {}
+        Q2 = {}
+        Q3 = {}
+
+        for state in [State.Excited,State.Ground]:
+
+            Q1[state.value] = []
+            Q2[state.value] = []
+            Q3[state.value] = []
+
+            for res in self.results[state.value]:
+
+                if state == State.Full :
+                    q_gr_f = get_full_q_tensor(res[2] - res[7]/2, res[3], res[4], res[5], res[6])
+                    q_ex_f = get_full_q_tensor(res[2] + res[7]/2, res[3], res[4], res[5], res[6])
+                    vals_gr_f, vals_ex_f = np.linalg.eigvals(q_gr_f), np.linalg.eigvals(q_ex_f)
+                    Qz_gr,Qy_gr,Qx_gr = np.sort(vals_gr_f)
+                    Qz_ex,Qy_ex,Qx_ex = np.sort(vals_ex_f)
+                    Q3[state.value].append((Qz_gr, Qz_ex))
+                    Q2[state.value].append((Qy_gr, Qy_ex))
+                    Q1[state.value].append((Qx_gr, Qx_ex))
+
+                else :
+                    D, E, Q, delta = res[1], res[2], res[3], res[4]
+                    q_tensor = get_q_tensor(D, E, Q, delta)
+                    Qz, Qy, Qx = np.linalg.eigvalsh(q_tensor)
+                    Q3[state.value].append(Qz)
+                    Q2[state.value].append(Qy)
+                    Q1[state.value].append(Qx)
+
+        sorted_index = np.argsort([np.mean(Q3[State.Ground.value]), np.mean(Q2[State.Ground.value]), np.mean(Q1[State.Ground.value])])
+        QZZ, QYY, QXX = [[Q3, Q2, Q1][i] for i in sorted_index[::-1]]
+
+        values = pretty_mcmc(
+            np.array([
+                np.array(QZZ[State.Ground.value]),
+                np.array(QYY[State.Ground.value]),
+                np.array(QXX[State.Ground.value]),
+            ]),
+            sig_figs=2,
+            central_scale=1.0,   # keep central as kHz if your samples are already in kHz
+            err_scale=1e3        # convert uncertainty to Hz
+        )
+        
+        QXX_ex_offsets = (QXX[State.Excited.value]-np.mean(QXX[State.Ground.value]))
+        QXX_gd_offsets = (QXX[State.Ground.value]-np.mean(QXX[State.Ground.value]))
+
+        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QXX_gd_offsets*1e3,QXX_ex_offsets*1e3,30,300)
+        axs[0].bar(e_e, c_e, width=w2, align="edge", alpha=1, label="Excited")
+        axs[0].bar(e_g, c_g, width=w1, align="edge", alpha=1, label="Ground")
+        # axs[0].set_xlabel(r'$Q_{XX} (Hz)$',fontsize = 14,fontweight = 'bold')
+        axs[0].set_xlim(right=5,left=-5)
+        # axs[0].set_ylabel('Normalized counts',fontsize = 14,fontweight = 'bold')
+
+        QYY_ex_offsets = (QYY[State.Excited.value]-np.mean(QYY[State.Ground.value]))
+        QYY_gd_offsets = (QYY[State.Ground.value]-np.mean(QYY[State.Ground.value]))
+        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QYY_gd_offsets*1e3,QYY_ex_offsets*1e3,30,300)
+        axs[1].bar(e_e, c_e, width=w2, align="edge", alpha=1, label="Excited")
+        axs[1].bar(e_g, c_g, width=w1, align="edge", alpha=1, label="Ground")
+        # axs[1].set_xlabel(r'$Q_{YY} (Hz)$',fontsize = 14,fontweight = 'bold')
+        axs[1].set_xlim(right=20,left=-20)
+ 
+ 
+ 
+        QZZ_ex_offsets = (QZZ[State.Excited.value]-np.mean(QZZ[State.Ground.value]))
+        QZZ_gd_offsets = (QZZ[State.Ground.value]-np.mean(QZZ[State.Ground.value]))
+        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QZZ_gd_offsets*1e3,QZZ_ex_offsets*1e3,30,300)
+        axs[2].bar(e_e, c_e, width=w2, align="edge", alpha=1, label="Excited")
+        axs[2].bar(e_g, c_g, width=w1, align="edge", alpha=1, label="Ground")
+        # axs[2].set_xlabel(r'$Q_{ZZ} (Hz)$',fontsize = 14,fontweight = 'bold')
+        axs[2].set_xlim(right=20,left=-20)
+
+        
+        # axs[0].set_title(f"{values[2][1]} KHz \n (-{values[2][0]} Hz / +{values[2][2]} Hz)",fontsize = 10,fontweight = 'bold')
+        # axs[1].set_title(f"{values[1][1]} KHz \n (-{values[1][0]} Hz / +{values[1][2]} Hz)",fontsize = 10,fontweight = 'bold')
+        # axs[2].set_title(f"{values[0][1]} KHz \n (-{values[0][0]} Hz / +{values[0][2]} Hz)",fontsize = 10,fontweight = 'bold')
+        
+        # axs[0].legend(fancybox=True,frameon=True,facecolor='lightgrey',edgecolor='grey',framealpha=1)
+        # axs[1].legend(fancybox=True,frameon=True,facecolor='lightgrey',edgecolor='grey',framealpha=1)
+        # axs[2].legend(fancybox=True,frameon=True,facecolor='lightgrey',edgecolor='grey',framealpha=1)
 
         plt.show()
 
     def Plot_full(self, title='Full Fit'):
         x = self.best_x[State.Full.value]
-        h: Qobj = Full_hamiltonian(x,self.system)
-        ground_transitions, excited_transitions = self.get_transitions_separated(h.eigenenergies())
+        h: Qobj = Full_hamiltonian(x,self.system,self.meas_Aperp)
+        ground_transitions, excited_transitions = get_transitions_separated(self.system,h.eigenenergies())
         fit = np.concatenate((ground_transitions,excited_transitions))
         error = (np.concatenate((ground_transitions,excited_transitions)) - self.meas)
         meas_to_plot = self.meas
         
-        fig, axs = plt.subplots(3, 1, figsize=(8, 6), tight_layout=True,sharex=True)
+        fig, axs = plt.subplots(3, 1, figsize=(8, 6), tight_layout=True,sharex=True,gridspec_kw={'height_ratios': [3, 1, 1]})
+        
+        for ax in axs:
+            for spine in ax.spines.values():
+                spine.set_linewidth(2)
+
+            ax.tick_params(width=2, length=6 ,labelsize = 12)
+        
+        
+        ms = 10
         plt.suptitle(title)
         plt.sca(axs[0])
-        plt.plot(meas_to_plot[:self.nb_state], 'o', marker = 'v', label= r"$\omega^{\downarrow}_{{n(n+1)}/2\pi}$", color = 'orange')
-        plt.plot(meas_to_plot[self.nb_state:], 'o', marker = '^', label= r"$\omega^{\uparrow}_{{n(n+1)}/2\pi}$", color = 'blue')
-
+        plt.plot(meas_to_plot[:self.nb_state]*1e-3, 'o', marker = 'v',markersize = ms, label= r"$\omega^{\downarrow}_{{n(n+1)}/2\pi}$", mfc='orange', mec='black')
+        plt.plot(meas_to_plot[self.nb_state:]*1e-3, 'o', marker = '^',markersize = ms, label= r"$\omega^{\uparrow}_{{n(n+1)}/2\pi}$", mfc='blue', mec='black')
+        # plt.ylim(1,8)
+        # plt.xlim(-0.5,8.5)
         # plt.plot(fit, 'o-', label='fit')
-        plt.xlabel('Transition')
-        plt.ylabel(rf'$f_{State.Ground.value}$ [kHz]')
-        plt.legend()
+        # plt.xlabel('Transition')
+        # plt.ylabel(r'$\omega / 2\pi$ (MHz)', fontsize=14, fontweight='bold')
+        leg = plt.legend(
+            fancybox=True,      # rounded corners
+            frameon=True,
+            facecolor='lightgrey',
+            edgecolor='grey',
+            framealpha=1
+        )
 
         plt.sca(axs[1])
         plt.errorbar(
             range(len(fit[:self.nb_state])),
             (error[:self.nb_state]) * 1e3,fmt = 'o',
             yerr=self.std_meas[:self.nb_state] * 1e3*2,
-            marker = 'v', color = 'orange'
+            marker = 'v',markersize = ms, mfc='orange', mec='black',ecolor = 'black',elinewidth=2
         )
-        plt.ylabel(r'$residual_{{\downarrow}} [Hz]$')
+        plt.axhline(0,linestyle = '--',color = 'black')
+        # plt.ylabel(r'$residual_{{\downarrow}} [Hz]$', fontsize=14, fontweight='bold')
 
         plt.sca(axs[2])
         plt.errorbar(
             range(len(fit[:self.nb_state])),
             (error[self.nb_state:]) * 1e3,fmt = 'o',
             yerr=self.std_meas[self.nb_state:] * 1e3*2,
-            marker = '^', color = 'blue'
+            marker = '^',markersize = ms, mfc='blue', mec='black',ecolor = 'black',elinewidth=2
         )
-        plt.xlabel('Transition')
-        plt.ylabel(r'$residual_{{\uparrow}} [Hz]$')
+        plt.xlabel('Transition', fontsize=14, fontweight='bold')
+        plt.axhline(0,linestyle = '--',color = 'black')
+        # plt.ylim(-150,150)
+        # plt.ylabel(r'$residual_{{\uparrow}} [Hz]$', fontsize=14, fontweight='bold')
 
         
+        
+        
+        # draw once so positions are known
+        fig.canvas.draw()
+
+        # use the default first-axis ylabel position as reference
+        renderer = fig.canvas.get_renderer()
+        tmp = axs[0].text(0, 0.5, r'$\omega / 2\pi$ (MHz)', rotation='vertical',
+                        transform=axs[0].transAxes, fontsize=14, fontweight='bold')
+        fig.canvas.draw()
+        bbox = tmp.get_window_extent(renderer=renderer)
+        tmp.remove()
+
+        x_fig, _ = fig.transFigure.inverted().transform((bbox.x0, bbox.y0))
+
+        # extra shift to the left in figure coordinates
+        x_offset = 0.1
+        x_shared = x_fig - x_offset
+
+        # vertical centers
+        pos0 = axs[0].get_position()
+        pos1 = axs[1].get_position()
+        pos2 = axs[2].get_position()
+
+        y0_center = 0.5 * (pos0.y0 + pos0.y1)
+        y12_center = 0.5 * (pos1.y0 + pos2.y1)
+
+        # manually place both labels at the same x position
+        fig.text(
+            x_shared, y0_center,
+            r'$\omega / 2\pi$ (MHz)',
+            rotation='vertical',
+            va='center',
+            ha='center',
+            fontsize=14,
+            fontweight='bold'
+        )
+
+        fig.text(
+            x_shared, y12_center,
+            'Residual [Hz]',
+            rotation='vertical',
+            va='center',
+            ha='center',
+            fontsize=14,
+            fontweight='bold'
+        )
+
         plt.show()
         
     def plot_levels_and_residuals_separated(self, x,state:State,title='',args={}):
@@ -312,7 +493,7 @@ class Hamiltonian_Fitter():
 
 
         else :
-            h: Qobj = Full_hamiltonian(x,self.system)
+            h: Qobj = Full_hamiltonian(x,self.system,self.meas_Aperp)
             ground_transitions, excited_transitions = get_transitions_separated(self.system,h.eigenenergies(),self.lamb_shift_meas)
             fit = np.concatenate((ground_transitions,excited_transitions))
             error = (np.concatenate((ground_transitions,excited_transitions)) - self.meas)
@@ -325,8 +506,8 @@ class Hamiltonian_Fitter():
         plt.suptitle(title)
 
         plt.sca(axs[0])
-        plt.plot(meas_to_plot, 'o', label='Measured')
         plt.plot(fit, 'o', label='fit')
+        plt.plot(meas_to_plot, 'x', label='Measured')
         plt.xlabel('Transition')
         plt.ylabel(rf'$f_{state.value}$ [kHz]')
         plt.legend()
@@ -350,18 +531,18 @@ class Hamiltonian_Fitter():
         # Get the chains from the sampler
         
         ndim = self.results[state.value].shape[1]
-
+        undiscarded_results = np.concatenate((self.discarded[state.value],self.results[state.value]), axis=0)
         fig, axes = plt.subplots(ndim, 1, figsize=(10, 2 * ndim), tight_layout=True, sharex=True)
         for i in range(ndim):
             ax = axes[i]
-            ax.plot(self.results[state.value][:,i], alpha=0.5,)  # Plot all walkers for parameter i
-            ax.set_ylabel(self.labels[i])
+            ax.plot(undiscarded_results[:,i], alpha=0.5,)  # Plot all walkers for parameter i
+            ax.set_ylabel(self._labels(state)[i])
 
         plt.show()
 
-    def run_MCMC(self, state:State, guess = None,nwalkers=64, nsteps=10000, var = 0.01):
+    def run_MCMC(self, state:State, guess = None,nwalkers=64, nsteps=10000, var = 0.01, discard = 10):
         
-        if guess == None:
+        if guess is None:
             guess = self.best_x[state.value]
             
         
@@ -378,29 +559,30 @@ class Hamiltonian_Fitter():
             meas=meas,
             std_meas=std_meas,
             lamb_shift_meas=lamb_shift_meas,
+            meas_Aperp = self.meas_Aperp
         )
 
         pos = guess * (1 +  var * np.random.randn(nwalkers, len(guess)))
         
-        self.results = {}
         self.sampler = None
         
         with Pool() as pool:
             sampler = emcee.EnsembleSampler(nwalkers, len(guess), log_likelihood, pool=pool)
             sampler.run_mcmc(pos, nsteps, progress=True)
 
-        samples = sampler.get_chain(discard=500, flat=True)
-        idx = sampler.get_log_prob()[500:].argmax()
+        samples = sampler.get_chain(discard=0, flat=True)
+        self.discarded[state.value] = samples[:discard]
+        idx = sampler.get_log_prob()[discard:].argmax()
 
         self.best_x[state.value] = samples[idx]
-        self.median_x[state.value] = np.median(samples, axis=0)
-        self.results[state.value] = samples
+        self.median_x[state.value] = np.median(samples[discard:], axis=0)
+        self.results[state.value] = samples[discard:]
 
         print("median x : ",self.median_x[state.value])
         print("best x : ",self.best_x[state.value])
 
 
-        values = pretty_mcmc(self.results[state.value], sig_figs=2)
+        values = pretty_mcmc(self.results[state.value].transpose(1,0), sig_figs=2)
         labels = self._labels(state)
         for i in range(len(labels)):
             low, central, high = values[i]
@@ -418,10 +600,11 @@ class Hamiltonian_Fitter():
         return sampler
     
     def Print_values(self, state:State):
-        values = pretty_mcmc(self.results[state.value], sig_figs=2)
-        for i in range(len(self.labels)):
+        values = pretty_mcmc(self.results[state.value].transpose(1,0), sig_figs=2)
+        labels = self._labels(state)
+        for i in range(len(labels)):
             low, central, high = values[i]
-            txt = (rf"\mathrm{{{self.labels[i]}}}"
+            txt = (rf"\mathrm{{{labels[i]}}}"
                rf" = {central}_{{-{low}}}^{{+{high}}}")
             display(Math(txt))
 
@@ -432,6 +615,7 @@ class Hamiltonian_Fitter():
             json.dump({
                 "best_x": self.best_x[state.value].tolist(),
                 "median_x": self.median_x[state.value].tolist(),
+                "discarded": self.discarded[state.value].tolist(),
                 "results": self.results[state.value].tolist()
             }   , f, indent=4, ensure_ascii=False)
 
@@ -445,6 +629,7 @@ class Hamiltonian_Fitter():
                 self.median_x[State.Ground.value] = np.array(data["median_x"])
                 if all:
                     self.results[State.Ground.value] = np.array(data["results"])
+                    self.discarded[State.Ground.value] = np.array(data["discarded"])
         except FileNotFoundError:
             print(f"File {filename} not found. Skipping loading ground state results.")
         
@@ -455,6 +640,7 @@ class Hamiltonian_Fitter():
                 self.best_x[State.Excited.value] = np.array(data["best_x"])
                 self.median_x[State.Excited.value] = np.array(data["median_x"])
                 if all:
+                    self.discarded[State.Excited.value] = np.array(data["discarded"])
                     self.results[State.Excited.value] = np.array(data["results"])
         except FileNotFoundError:
             print(f"File {filename} not found. Skipping loading excited state results.")
@@ -466,13 +652,16 @@ class Hamiltonian_Fitter():
                 self.best_x[State.Full.value] = np.array(data["best_x"])
                 self.median_x[State.Full.value] = np.array(data["median_x"])
                 if all:
+                    self.discarded[State.Full.value] = np.array(data["discarded"])
                     self.results[State.Full.value] = np.array(data["results"])
         except FileNotFoundError:
             print(f"File {filename} not found. Skipping loading full state results.")
             
 
     def Plot_Best(self,state:State):
-        residuals_avg = np.average(np.abs(self.get_log_likelihood_separated(self.best_x[state.value],state)))
+
+        print('lambshift get_log_likelihood_separated = ',self.lamb_shift_meas)
+        residuals_avg = np.average(np.abs(get_log_likelihood_separated(x = self.best_x[state.value],system = self.system,meas = self.meas,state = state,std_meas = self.std_meas,lamb_shift_meas = self.lamb_shift_meas,meas_Aperp = self.meas_Aperp)))
         self.plot_levels_and_residuals_separated(
             self.best_x[state.value],
             state=state,
@@ -487,12 +676,13 @@ class Hamiltonian_Fitter():
         )
 
     def Plot_corner(self,state:State):
-
-        fig = corner.corner(self.results[state.value], labels=self._labels(state), truths=self.median_x[state.value])
+        
+        undiscarded_results = np.concatenate((self.discarded[state.value],self.results[state.value]), axis=0)
+        fig = corner.corner(undiscarded_results[discard:, :], labels=self._labels(state), truths=self.median_x[state.value])
         plt.show()
 
 
-def get_log_likelihood_separated(x,system,state:State,meas,std_meas,lamb_shift_meas = None):
+def get_log_likelihood_separated(x,system,state:State,meas,std_meas,lamb_shift_meas = None,meas_Aperp = None):
 
 
     if state == State.Excited :
@@ -502,13 +692,15 @@ def get_log_likelihood_separated(x,system,state:State,meas,std_meas,lamb_shift_m
         
     elif state == State.Ground :
         h: Qobj = hamiltonian(x,system)
-        ground_transitions, excited_transitions = get_transitions_separated(system,h.eigenenergies(),lamb_shift_meas)
+        ground_transitions, excited_transitions = get_transitions_separated(system,h.eigenenergies())
         residuals = (ground_transitions - meas[:int(system.I*2)]) / std_meas[:int(system.I*2)] + log_prior(x)
         
     elif state == State.Full :
-        h: Qobj = Full_hamiltonian(x,system)
+        h: Qobj = Full_hamiltonian(x,system,meas_Aperp)
+        print('lambshift get_log_likelihood_separated = ',lamb_shift_meas)
+
         ground_transitions, excited_transitions = get_transitions_separated(system,h.eigenenergies(),lamb_shift_meas)
-        meas_to_compare = np.concatenate((meas[:int(system.I*2)],meas[int(system.I*2):] + meas[:int(system.I*2)]))
+        meas_to_compare = np.concatenate((meas[:int(system.I*2)],meas[int(system.I*2):]))
         residuals = (np.concatenate((ground_transitions,excited_transitions)) - meas_to_compare) / std_meas #excited
 
     elif state == State.Heca :
@@ -524,13 +716,14 @@ def get_log_likelihood_separated(x,system,state:State,meas,std_meas,lamb_shift_m
 
 
 def get_transitions_separated(system,e,lamb_shift_meas = 0):
+    print('lambshift get transition = ',lamb_shift_meas)
     ground_transitions = np.diff(e[:int(system.I*2+1)])
     excited_transitions = np.diff(e[int(system.I*2+1):] + lamb_shift_meas)
     return ground_transitions, excited_transitions
 
 
 def log_prior_full(x):
-    Bz, A, D, S1, S2, delta, alpha, Dz = x
+    # Bz, A, D, S1, S2, delta, alpha, Dz = x
 
     # # -------- hard bounds (algebraic) --------------------------------
     # if S1 <= 0.0 or S2 <= 0.0:          # S1 and S2 must be positive
