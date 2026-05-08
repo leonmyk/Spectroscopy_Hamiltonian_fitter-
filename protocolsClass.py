@@ -25,6 +25,7 @@ from IPython.display import display, Math
 from scipy.stats import chi2
 import json
 
+from functions import Full_hamiltonian_V2
 from functions import Full_hamiltonian
 from functions import hamiltonian
 from functions import hamiltonian_Heca
@@ -540,7 +541,7 @@ class Hamiltonian_Fitter():
 
         plt.show()
 
-    def run_MCMC(self, state:State, guess = None,nwalkers=64, nsteps=10000, var = 0.01, discard = 10):
+    def run_MCMC(self, state:State, guess = None,nwalkers=64, nsteps=10000, var = 0.01, discard = 10,angle = None):
         
         if guess is None:
             guess = self.best_x[state.value]
@@ -559,7 +560,8 @@ class Hamiltonian_Fitter():
             meas=meas,
             std_meas=std_meas,
             lamb_shift_meas=lamb_shift_meas,
-            meas_Aperp = self.meas_Aperp
+            meas_Aperp = self.meas_Aperp,
+            angle = angle
         )
 
         pos = guess * (1 +  var * np.random.randn(nwalkers, len(guess)))
@@ -682,7 +684,7 @@ class Hamiltonian_Fitter():
         plt.show()
 
 
-def get_log_likelihood_separated(x,system,state:State,meas,std_meas,lamb_shift_meas = None,meas_Aperp = None):
+def get_log_likelihood_separated(x,system,state:State,meas,std_meas,lamb_shift_meas = None,meas_Aperp = None,angle = None):
 
 
     if state == State.Excited :
@@ -696,7 +698,7 @@ def get_log_likelihood_separated(x,system,state:State,meas,std_meas,lamb_shift_m
         residuals = (ground_transitions - meas[:int(system.I*2)]) / std_meas[:int(system.I*2)] + log_prior(x)
         
     elif state == State.Full :
-        h: Qobj = Full_hamiltonian(x,system,meas_Aperp)
+        h: Qobj = Full_hamiltonian_V2(x,system,meas_Aperp,angle)
         print('lambshift get_log_likelihood_separated = ',lamb_shift_meas)
 
         ground_transitions, excited_transitions = get_transitions_separated(system,h.eigenenergies(),lamb_shift_meas)
