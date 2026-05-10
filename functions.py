@@ -67,12 +67,14 @@ mu_Ca = -2.86899 #[kHz / mT]
 
 class SpinSystem:
 
-    def __init__(self,mu:str, S=1/2, I=7/2):
+    def __init__(self,mu:str,simu_A, S=1/2, I=7/2):
         self.S = S
         self.I = I
 
         self.gamma_Er = np.array([117.3, 117.3, 17.45]) * 1e9 * h  # hyperfine coupling constants in Hz/T * h
         self.g_Er = gamma_Er / mu_B
+
+        self.simu_A = simu_A
 
         # Electron operators
         self.Sx = jmat(S, 'x')
@@ -348,39 +350,48 @@ def complex_ramsey_gaussian_fit(t,f,T,phi,A,B):
         Z=A*np.exp(1j*(2*np.pi*f*t+phi))*np.real(np.exp(-t**2/T**2)) + B*(1+1j)
         return np.concatenate([np.real(Z),np.imag(Z)])      
     
-def hyperfine_hamiltonian(sytem:SpinSystem, A, meas_Aperp) -> Qobj:
+def hyperfine_hamiltonian(system:SpinSystem, A, meas_Aperp) -> Qobj:
     h = 0 # Hyperfine interaction 
-    for i, s_op in enumerate([sytem.Sx, sytem.Sy]):
-        for j, i_op in enumerate([sytem.Ix, sytem.Iy, sytem.Iz]):
+    for i, s_op in enumerate([system.Sx, system.Sy]):
+        for j, i_op in enumerate([system.Ix, system.Iy, system.Iz]):
             h += simu_A[i, j] * tensor(s_op, i_op)
-    return A * tensor(sytem.Sz, sytem.Iz) + meas_Aperp * tensor(sytem.Sz, sytem.Ix) + h
+    return A * tensor(system.Sz, system.Iz) + meas_Aperp * tensor(system.Sz, system.Ix) + h
 
-def hyperfine_hamiltonian_vectorized(sytem:SpinSystem, A, meas_Aperp) -> Qobj:
-    h = 0 # Hyperfine interaction 
-    for i, s_op in enumerate([sytem.Sx, sytem.Sy]):
-        for j, i_op in enumerate([sytem.Ix, sytem.Iy, sytem.Iz]):
-            h += simu_A[i, j] * tensor(s_op, i_op)
-    return A * tensor(sytem.Sz, sytem.Iz) + meas_Aperp * tensor(sytem.Sz, sytem.Ix) + h
+def hyperfine_hamiltonian_V2(system:SpinSystem,B0, A_para, meas_Aperp) -> Qobj:
 
-def quadrupole_hamiltonian_param(sytem:SpinSystem, D, E, Q, delta) -> Qobj:
+
+    hyperfine_tensor = 0 # Hyperfine interaction 
+    hyperfine_matrix = np.diag(meas_Aperp,meas_Aperp,A_para)
+    for i in range(3):
+        for j in range(i):
+            hyperfine_matrix[i,j] = system.simu_A[i, j]
+            hyperfine_matrix[j,i] = system.simu_A[j, i]
+    
+    R = Get_nuc_to_elec_rotation(system.g_Er, B0)
+    rotated_hyperfine_matrix = R @ hyperfine_matrix @ R.conj().T
+
+
+    for i, s_op in enumerate([system.Sx, system.Sy,system.Sz]):
+        for j, i_op in enumerate([system.Ix, system.Iy, system.Iz]):
+            hyperfine_tensor += rotated_hyperfine_matrix[i, j] * tensor(s_op, i_op)
+
+
+    return hyperfine_tensor
+
+def quadrupole_hamiltonian_param(system:SpinSystem, D, E, Q, delta) -> Qobj:
     q_tensor = get_q_tensor(D, E, Q, delta)
     h = 0
-    for i, i1 in enumerate([sytem.Ix, sytem.Iy, sytem.Iz]):
-        for j, i2 in enumerate([sytem.Ix, sytem.Iy, sytem.Iz]):
-            h += q_tensor[i, j] * tensor(sytem.Id_S, i1 * i2)
+    for i, i1 in enumerate([system.Ix, system.Iy, system.Iz]):
+        for j, i2 in enumerate([system.Ix, system.Iy, system.Iz]):
+            h += q_tensor[i, j] * tensor(system.Id_S, i1 * i2)
     return h
 
-def zeeman_hamiltonian(sytem:SpinSystem, Bz) -> Qobj:
-    return -np.sign(sytem.mu)*Bz * (
-        mu_Er * tensor(sytem.Sz, sytem.Id_I) +
-        sytem.mu * tensor(sytem.Id_S, sytem.Iz)
+def zeeman_hamiltonian(system:SpinSystem, Bz) -> Qobj:
+    return -np.sign(system.mu)*Bz * (
+        mu_Er * tensor(system.Sz, system.Id_I) +
+        system.mu * tensor(system.Id_S, system.Iz)
     )
 
-def zeeman_hamiltonian_vectorized(system:SpinSystem, B) -> Qobj:
-    return -np.sign(system.mu)*B * (
-        g_Er * system.S_ops +
-        system.mu * system.I_ops
-    )
     
 def get_q_tensor(D, E, Q, delta):
     c = E * np.cos(2 * delta)
@@ -404,37 +415,41 @@ def get_full_q_tensor(D, S1, S2, delta, theta):
     ])
     return q_tensor
 
-def full_quadrupole_hamiltonian_param(sytem:SpinSystem, D, S1, S2, delta, theta) -> Qobj:
+def full_quadrupole_hamiltonian_param(system:SpinSystem, D, S1, S2, delta, theta) -> Qobj:
     q_tensor = get_full_q_tensor(D, S1, S2, delta, theta)
     h = 0
-    for i, i1 in enumerate([sytem.Ix, sytem.Iy, sytem.Iz]):
-        for j, i2 in enumerate([sytem.Ix, sytem.Iy, sytem.Iz]):
-            h += q_tensor[i, j] * tensor(sytem.Id_S, i1*i2)
+    for i, i1 in enumerate([system.Ix, system.Iy, system.Iz]):
+        for j, i2 in enumerate([system.Ix, system.Iy, system.Iz]):
+            h += q_tensor[i, j] * tensor(system.Id_S, i1*i2)
     print(q_tensor)
     return h
 
 # Define the Hamiltonian
-def Full_hamiltonian(x: np.ndarray, sytem:SpinSystem,meas_Aperp) -> Qobj: 
+def Full_hamiltonian(x: np.ndarray, system:SpinSystem,meas_Aperp) -> Qobj: 
     Bz, A, D, S1, S2, delta, alpha, Dz , meas_Aperp = x
-    return zeeman_hamiltonian(sytem,Bz) +\
-        hyperfine_hamiltonian(sytem,A,meas_Aperp) +\
-        full_quadrupole_hamiltonian_param(sytem,D, S1, S2, delta, alpha) +\
-        sdq_hamiltonian_param(sytem,Dz) #+\
+    return zeeman_hamiltonian(system,Bz) +\
+        hyperfine_hamiltonian(system,A,meas_Aperp) +\
+        full_quadrupole_hamiltonian_param(system,D, S1, S2, delta, alpha) +\
+        sdq_hamiltonian_param(system,Dz) #+\
         #hexadecapole_hamiltonian(Hx)
 
 
-def Full_hamiltonian_V2(x: np.ndarray, sytem:SpinSystem) -> Qobj: 
-    B, A, D, S1, S2, delta, alpha, Dz  = x
-    return zeeman_hamiltonian_V2(sytem,B) +\
-        hyperfine_hamiltonian(sytem,A) +\
-        full_quadrupole_hamiltonian_param(sytem,D, S1, S2, delta, alpha) +\
-        sdq_hamiltonian_param(sytem,Dz) #+\
+def Full_hamiltonian_V2(x: np.ndarray, system:SpinSystem ,meas_Aperp,angle) -> Qobj: 
+    B0, A_para, D, S1, S2, delta, alpha, Dz  = x
+
+
+    B = np.array([np.sin(angle),0,np.cos(angle)])*B0
+
+    return zeeman_hamiltonian_V2(system,B,angle) +\
+        hyperfine_hamiltonian_V2(system,B,A_para,meas_Aperp) +\
+        full_quadrupole_hamiltonian_param(system,D, S1, S2, delta, alpha) +\
+        sdq_hamiltonian_param(system,Dz) #+\
 
 
 def Get_nuc_to_elec_rotation(elec_g_tensor,B):
 
-    ez = elec_g_tensor@B/np.norm(elec_g_tensor@B)
-    ex = np.cross(ez,B)/np.norm(np.cross(ez,B))
+    ez = elec_g_tensor*B/np.linalg.norm(elec_g_tensor*B)
+    ex = np.cross(ez,B)/np.linalg.norm(np.cross(ez,B))
     ey = np.cross(ez,ex)
 
     rotation_matrix = np.vstack((ex,ey,ez))
@@ -442,19 +457,19 @@ def Get_nuc_to_elec_rotation(elec_g_tensor,B):
     return rotation_matrix
 
 
-def zeeman_hamiltonian_V2(sytem: SpinSystem, B) -> Qobj:
+def zeeman_hamiltonian_V2(system: SpinSystem, B, angle) -> Qobj:
 
-    R = Get_nuc_to_elec_rotation(sytem.g_Er, B)
-    Beff = R @ (sytem.g_Er @ B)
-    Beffz = np.linalg.norm(Beff)
+    R = Get_nuc_to_elec_rotation(system.g_Er, B) # rotation makes the basis align with the electron effective magnetic field 
 
-    B_rot = R @ B  # rotated field vector, shape (3,)
+    Beffz = np.linalg.norm(R @ (system.g_Er * B)) #effective field of the electron 
 
-    elec_term = -Beffz * mu_B * tensor(sytem.Sz, sytem.Id_I)
+    B_rot = R @ B  # the field perceived by the nuclear spin which is different to the electron because of the anisotropic g tensor 
 
-    nuc_term = -sytem.mu * sum(
-        Bi * tensor(sytem.Id_S, Ii)
-        for Bi, Ii in zip(B_rot, [sytem.Ix, sytem.Iy, sytem.Iz])
+    elec_term = -Beffz * mu_B * tensor(system.Sz, system.Id_I)
+
+    nuc_term = -system.mu * sum(
+        Bi * tensor(system.Id_S, Ii)
+        for Bi, Ii in zip(B_rot, [system.Ix, system.Iy, system.Iz])
     )
 
     return elec_term + nuc_term
@@ -721,9 +736,12 @@ def get_HyperFine(r,b0,theta,atome:str = None,n_e= None,n_n=None):
     mu = mu_Ca if atome == 'Ca' else mu_Nb if atome == 'Nb' else mu_W
     Tdd = get_hyperfine_tensor(g_Er, mu, r)  # hyperfine tensor in crystal frame
     R_left, R_right = get_rotations(n_e, n_n)
-    A_p = R_left @ Tdd @ R_right.T   # transpose on the nuclear rotationA_par = R_left @ Tdd @ R_right
+    # A_p = R_left @ Tdd @ R_right.T   # transpose on the nuclear rotationA_par = R_left @ Tdd @ R_right
+    A_p = Tdd
     A_par = A_p[2,2]
-    A_per = np.sqrt(A_p[2,0]**2+A_p[2,1]**2)
+    # A_per = np.sqrt(A_p[2,0]**2+A_p[2,1]**2)
+    A_per = A_p[1,1]
+
 
     return A_par, A_per, A_p
 

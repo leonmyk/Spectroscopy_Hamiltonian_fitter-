@@ -83,6 +83,7 @@ class Hamiltonian_Fitter():
         self.system = system
         self.nb_trans = int(self.system.I*2+1)
         self.nb_state = int(self.system.I*2)
+        self.angle = None
         
 
         
@@ -366,7 +367,7 @@ class Hamiltonian_Fitter():
 
     def Plot_full(self, title='Full Fit'):
         x = self.best_x[State.Full.value]
-        h: Qobj = Full_hamiltonian(x,self.system,self.meas_Aperp)
+        h: Qobj = Full_hamiltonian_V2(x,self.system,self.meas_Aperp,self.angle)
         ground_transitions, excited_transitions = get_transitions_separated(self.system,h.eigenenergies())
         fit = np.concatenate((ground_transitions,excited_transitions))
         error = (np.concatenate((ground_transitions,excited_transitions)) - self.meas)
@@ -472,7 +473,7 @@ class Hamiltonian_Fitter():
 
         plt.show()
         
-    def plot_levels_and_residuals_separated(self, x,state:State,title='',args={}):
+    def plot_levels_and_residuals_separated(self, x,state:State,title='',angle = None):
 
         if state == State.Excited :
             h: Qobj = hamiltonian(x,self.system)
@@ -494,7 +495,7 @@ class Hamiltonian_Fitter():
 
 
         else :
-            h: Qobj = Full_hamiltonian(x,self.system,self.meas_Aperp)
+            h: Qobj = Full_hamiltonian_V2(x,self.system,self.meas_Aperp,angle)
             ground_transitions, excited_transitions = get_transitions_separated(self.system,h.eigenenergies(),self.lamb_shift_meas)
             fit = np.concatenate((ground_transitions,excited_transitions))
             error = (np.concatenate((ground_transitions,excited_transitions)) - self.meas)
@@ -596,7 +597,8 @@ class Hamiltonian_Fitter():
         self.plot_levels_and_residuals_separated(
             self.median_x[state.value],
             state,
-            title='Median X errors'
+            title='Median X errors',
+            angle = angle
         )
 
         return sampler
