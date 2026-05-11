@@ -3,6 +3,49 @@ from qutip import *
 
 
 
+
+
+class SpinSystem:
+
+    def __init__(self,mu:str, S=1/2, I=7/2):
+        self.S = S
+        self.I = I
+
+        self.gamma_Er = np.array([117.3, 117.3, 17.45]) * 1e9 * h  # hyperfine coupling constants in Hz/T * h
+        self.g_Er = gamma_Er / mu_B
+
+
+        # Electron operators
+        self.Sx = jmat(S, 'x')
+        self.Sy = jmat(S, 'y')
+        self.Sz = jmat(S, 'z')
+
+        # Nuclear operators
+        self.Ix = jmat(I, 'x')
+        self.Iy = jmat(I, 'y')
+        self.Iz = jmat(I, 'z')
+
+        self.Id_S = qeye(int(2*S + 1))
+        self.Id_I = qeye(int(2*I + 1))
+
+        self.S_ops = np.array([
+            tensor(self.Sx, self.Id_I),
+            tensor(self.Sy, self.Id_I),
+            tensor(self.Sz, self.Id_I)
+        ])
+
+        self.I_ops = np.array([
+            tensor(self.Id_S, self.Ix),
+            tensor(self.Id_S, self.Iy),
+            tensor(self.Id_S, self.Iz)
+        ])
+        
+        if mu == "Nb":
+            self.mu = mu_Nb
+        elif mu == "Ca":
+            self.mu = mu_Ca
+            
+
 # Constants
 h    = 6.6260693e-34       # Plank constant
 mu_N = 5.0507836991e-27    # Nuclear magneton in J/T
@@ -96,19 +139,17 @@ def hyperfine_hamiltonian(system:SpinSystem, A, meas_Aperp) -> Qobj:
             h += simu_A[i, j] * tensor(s_op, i_op)
     return A * tensor(system.Sz, system.Iz) + meas_Aperp * tensor(system.Sz, system.Ix) + h
 
-def hyperfine_hamiltonian_V2(system:SpinSystem,B0, A_para, meas_Aperp) -> Qobj:
+def hyperfine_hamiltonian_V2(system:SpinSystem,B0, A_para, meas_Aperp,hyperfine_matrix) -> Qobj:
 
 
     hyperfine_tensor = 0 # Hyperfine interaction 
-    hyperfine_matrix = np.diag(meas_Aperp,meas_Aperp,A_para)
-    for i in range(3):
-        for j in range(i):
-            hyperfine_matrix[i,j] = system.simu_A[i, j]
-            hyperfine_matrix[j,i] = system.simu_A[j, i]
     
     R = Get_nuc_to_elec_rotation(system.g_Er, B0)
+
     rotated_hyperfine_matrix = R @ hyperfine_matrix @ R.conj().T
 
+    rotated_hyperfine_matrix[2,0] = meas_Aperp
+    rotated_hyperfine_matrix[2,2] = A_para
 
     for i, s_op in enumerate([system.Sx, system.Sy,system.Sz]):
         for j, i_op in enumerate([system.Ix, system.Iy, system.Iz]):
@@ -173,14 +214,14 @@ def Full_hamiltonian(x: np.ndarray, system:SpinSystem,meas_Aperp) -> Qobj:
         #hexadecapole_hamiltonian(Hx)
 
 
-def Full_hamiltonian_V2(x: np.ndarray, system:SpinSystem ,meas_Aperp,angle) -> Qobj: 
+def Full_hamiltonian_V2(x: np.ndarray, system:SpinSystem ,meas_Aperp,angle,simu_A) -> Qobj: 
     B0, A_para, D, S1, S2, delta, alpha, Dz  = x
 
 
     B = np.array([np.sin(angle),0,np.cos(angle)])*B0
 
     return zeeman_hamiltonian_V2(system,B,angle) +\
-        hyperfine_hamiltonian_V2(system,B,A_para,meas_Aperp) +\
+        hyperfine_hamiltonian_V2(system,B,A_para,meas_Aperp,simu_A) +\
         full_quadrupole_hamiltonian_param(system,D, S1, S2, delta, alpha) +\
         sdq_hamiltonian_param(system,Dz) #+\
 
@@ -212,51 +253,6 @@ def zeeman_hamiltonian_V2(system: SpinSystem, B, angle) -> Qobj:
     )
 
     return elec_term + nuc_term
-
-
-
-
-class SpinSystem:
-
-    def __init__(self,mu:str,simu_A, S=1/2, I=7/2):
-        self.S = S
-        self.I = I
-
-        self.gamma_Er = np.array([117.3, 117.3, 17.45]) * 1e9 * h  # hyperfine coupling constants in Hz/T * h
-        self.g_Er = gamma_Er / mu_B
-
-        self.simu_A = simu_A
-
-        # Electron operators
-        self.Sx = jmat(S, 'x')
-        self.Sy = jmat(S, 'y')
-        self.Sz = jmat(S, 'z')
-
-        # Nuclear operators
-        self.Ix = jmat(I, 'x')
-        self.Iy = jmat(I, 'y')
-        self.Iz = jmat(I, 'z')
-
-        self.Id_S = qeye(int(2*S + 1))
-        self.Id_I = qeye(int(2*I + 1))
-
-        self.S_ops = np.array([
-            tensor(self.Sx, self.Id_I),
-            tensor(self.Sy, self.Id_I),
-            tensor(self.Sz, self.Id_I)
-        ])
-
-        self.I_ops = np.array([
-            tensor(self.Id_S, self.Ix),
-            tensor(self.Id_S, self.Iy),
-            tensor(self.Id_S, self.Iz)
-        ])
-        
-        if mu == "Nb":
-            self.mu = mu_Nb
-        elif mu == "Ca":
-            self.mu = mu_Ca
-            
         
 
 

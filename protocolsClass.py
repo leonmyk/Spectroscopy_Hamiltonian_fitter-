@@ -25,45 +25,22 @@ from IPython.display import display, Math
 from scipy.stats import chi2
 import json
 
-from functions import Full_hamiltonian_V2
-from functions import Full_hamiltonian
-from functions import hamiltonian
-from functions import hamiltonian_Heca
-from functions import get_q_tensor
+from Hamiltonians import Full_hamiltonian_V2
+from Hamiltonians import Full_hamiltonian
+from Hamiltonians import hamiltonian
+from Hamiltonians import hamiltonian_Heca
+from Hamiltonians import get_q_tensor
 from functions import normalise_Histogram_Height
 from functions import pretty_mcmc
-from functions import get_full_q_tensor
-from functions import SpinSystem
+from Hamiltonians import get_full_q_tensor
+from Hamiltonians import SpinSystem
 
-# # Constants
-# mu_Nb = 10.4213  # [kHz / mT]
-# mu_Er = - 17_350 # [kHz / mT]
-# mu_N = 5.0507836991e-27    # Nuclear magneton in J/T
-
-
-# gamma_Nb_ref = 6.567400e7/2/np.pi # MHz/T
-# mu_Nb = gamma_Nb_ref * h  # J/T
-# g_Nb = mu_Nb / mu_N
-
-
-# Define the electron spin operators (S = 1/2)
-S = 1/2
-Sx = jmat(S, 'x')
-Sy = jmat(S, 'y')
-Sz = jmat(S, 'z')
-
-# Define the nuclear spin operators (I = 9/2)
-I = 7/2
-Ix = jmat(I, 'x')
-Iy = jmat(I, 'y')
-Iz = jmat(I, 'z')
 
 class State(Enum):
     Ground = "ground"
     Excited = "excited"
     Full = "full"
     Heca = "heca"
-
 
 
 class Hamiltonian_Fitter():
@@ -562,7 +539,8 @@ class Hamiltonian_Fitter():
             std_meas=std_meas,
             lamb_shift_meas=lamb_shift_meas,
             meas_Aperp = self.meas_Aperp,
-            angle = angle
+            angle = angle,
+            simu_A = self.simu_A
         )
 
         pos = guess * (1 +  var * np.random.randn(nwalkers, len(guess)))
@@ -665,7 +643,7 @@ class Hamiltonian_Fitter():
     def Plot_Best(self,state:State):
 
         print('lambshift get_log_likelihood_separated = ',self.lamb_shift_meas)
-        residuals_avg = np.average(np.abs(get_log_likelihood_separated(x = self.best_x[state.value],system = self.system,meas = self.meas,state = state,std_meas = self.std_meas,lamb_shift_meas = self.lamb_shift_meas,meas_Aperp = self.meas_Aperp)))
+        residuals_avg = np.average(np.abs(get_log_likelihood_separated(x = self.best_x[state.value],system = self.system,meas = self.meas,state = state,std_meas = self.std_meas,lamb_shift_meas = self.lamb_shift_meas,meas_Aperp = self.meas_Aperp,simu_A=self.simu_A)))
         self.plot_levels_and_residuals_separated(
             self.best_x[state.value],
             state=state,
@@ -686,7 +664,7 @@ class Hamiltonian_Fitter():
         plt.show()
 
 
-def get_log_likelihood_separated(x,system,state:State,meas,std_meas,lamb_shift_meas = None,meas_Aperp = None,angle = None):
+def get_log_likelihood_separated(x,system,state:State,meas,std_meas,lamb_shift_meas = None,meas_Aperp = None,angle = None,simu_A = None):
 
 
     if state == State.Excited :
@@ -700,7 +678,7 @@ def get_log_likelihood_separated(x,system,state:State,meas,std_meas,lamb_shift_m
         residuals = (ground_transitions - meas[:int(system.I*2)]) / std_meas[:int(system.I*2)] + log_prior(x)
         
     elif state == State.Full :
-        h: Qobj = Full_hamiltonian_V2(x,system,meas_Aperp,angle)
+        h: Qobj = Full_hamiltonian_V2(x,system,meas_Aperp,angle,simu_A)
         print('lambshift get_log_likelihood_separated = ',lamb_shift_meas)
 
         ground_transitions, excited_transitions = get_transitions_separated(system,h.eigenenergies(),lamb_shift_meas)

@@ -56,7 +56,6 @@ g_W = mu_W / mu_N
 gamma_Nb_ref = 6.567400e7/2/np.pi # MHz/T
 mu_Nb_ = gamma_Nb_ref * h  # J/T
 g_Nb = mu_Nb_ / mu_N
-mu_Nb = 10.4213  # [kHz / mT]
 
 # Calcium-43 nuclear magnetic moment
 gamma_Ca_ref = -2.86899e6          # Hz/T  (=-2.86899 MHz/T)  (43Ca)  :contentReference[oaicite:3]{index=3}
