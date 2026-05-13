@@ -73,7 +73,7 @@ def get_HyperFine(r,theta,mu):
     Hyperfine_tensor_rot = R @ Hyperfine_tensor @ R.T
 
     A_par = Hyperfine_tensor_rot[2, 2]
-    A_per = Hyperfine_tensor_rot[2, 0]
+    A_per = Hyperfine_tensor_rot[2, 0] # This is because the field B is [sin,0,cos] if it was [0,sin,cos] it would be Hyperfine_tensor_rot[2, 1]
 
     return A_par, A_per, Hyperfine_tensor_rot
 

@@ -45,7 +45,7 @@ class State(Enum):
 
 class Hamiltonian_Fitter():
 
-    def __init__(self, meas, std_meas,system:SpinSystem,id:str, meas_Aperp:float = None , simu_A:float = None):
+    def __init__(self, meas, std_meas,system:SpinSystem,id:str, meas_Aperp:float = None , simu_A:float = None,angle = None):
 
         self.meas = meas
         self.std_meas = std_meas
@@ -60,7 +60,7 @@ class Hamiltonian_Fitter():
         self.system = system
         self.nb_trans = int(self.system.I*2+1)
         self.nb_state = int(self.system.I*2)
-        self.angle = None
+        self.angle = angle
         
 
         
@@ -344,7 +344,7 @@ class Hamiltonian_Fitter():
 
     def Plot_full(self, title='Full Fit'):
         x = self.best_x[State.Full.value]
-        h: Qobj = Full_hamiltonian_V2(x,self.system,self.meas_Aperp,self.angle)
+        h: Qobj = Full_hamiltonian_V2(x,self.system,self.meas_Aperp,self.angle,self.simu_A)
         ground_transitions, excited_transitions = get_transitions_separated(self.system,h.eigenenergies())
         fit = np.concatenate((ground_transitions,excited_transitions))
         error = (np.concatenate((ground_transitions,excited_transitions)) - self.meas)
@@ -450,7 +450,7 @@ class Hamiltonian_Fitter():
 
         plt.show()
         
-    def plot_levels_and_residuals_separated(self, x,state:State,title='',angle = None):
+    def plot_levels_and_residuals_separated(self, x,state:State,title=''):
 
         if state == State.Excited :
             h: Qobj = hamiltonian(x,self.system)
@@ -472,7 +472,7 @@ class Hamiltonian_Fitter():
 
 
         else :
-            h: Qobj = Full_hamiltonian_V2(x,self.system,self.meas_Aperp,angle)
+            h: Qobj = Full_hamiltonian_V2(x,self.system,self.meas_Aperp,self.angle,self.simu_A)
             ground_transitions, excited_transitions = get_transitions_separated(self.system,h.eigenenergies(),self.lamb_shift_meas)
             fit = np.concatenate((ground_transitions,excited_transitions))
             error = (np.concatenate((ground_transitions,excited_transitions)) - self.meas)
@@ -519,7 +519,7 @@ class Hamiltonian_Fitter():
 
         plt.show()
 
-    def run_MCMC(self, state:State, guess = None,nwalkers=64, nsteps=10000, var = 0.01, discard = 10,angle = None):
+    def run_MCMC(self, state:State, guess = None,nwalkers=64, nsteps=10000, var = 0.01, discard = 10):
         
         if guess is None:
             guess = self.best_x[state.value]
@@ -539,7 +539,7 @@ class Hamiltonian_Fitter():
             std_meas=std_meas,
             lamb_shift_meas=lamb_shift_meas,
             meas_Aperp = self.meas_Aperp,
-            angle = angle,
+            angle = self.angle,
             simu_A = self.simu_A
         )
 
@@ -576,7 +576,6 @@ class Hamiltonian_Fitter():
             self.median_x[state.value],
             state,
             title='Median X errors',
-            angle = angle
         )
 
         return sampler
@@ -643,7 +642,7 @@ class Hamiltonian_Fitter():
     def Plot_Best(self,state:State):
 
         print('lambshift get_log_likelihood_separated = ',self.lamb_shift_meas)
-        residuals_avg = np.average(np.abs(get_log_likelihood_separated(x = self.best_x[state.value],system = self.system,meas = self.meas,state = state,std_meas = self.std_meas,lamb_shift_meas = self.lamb_shift_meas,meas_Aperp = self.meas_Aperp,simu_A=self.simu_A)))
+        residuals_avg = np.average(np.abs(get_log_likelihood_separated(x = self.best_x[state.value],system = self.system,meas = self.meas,state = state,std_meas = self.std_meas,lamb_shift_meas = self.lamb_shift_meas,meas_Aperp = self.meas_Aperp,simu_A=self.simu_A,angle=self.angle)))
         self.plot_levels_and_residuals_separated(
             self.best_x[state.value],
             state=state,
@@ -657,7 +656,7 @@ class Hamiltonian_Fitter():
             title='Best X errors'
         )
 
-    def Plot_corner(self,state:State):
+    def Plot_corner(self,state:State,discard):
         
         undiscarded_results = np.concatenate((self.discarded[state.value],self.results[state.value]), axis=0)
         fig = corner.corner(undiscarded_results[discard:, :], labels=self._labels(state), truths=self.median_x[state.value])

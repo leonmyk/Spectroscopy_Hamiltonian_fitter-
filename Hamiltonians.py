@@ -56,7 +56,7 @@ mu_B = 9.27401007831e-24   # Bohr magneton in J/T
 gamma_Er = np.array([117.3, 117.3, 17.45]) * 1e9 * h  # hyperfine coupling constants in Hz/T * h
 g_Er = gamma_Er / mu_B
 g_a, g_b, g_c = g_Er
-mu_Er = - 17_350 # [kHz / mT]
+mu_Er = -np.array([117.3, 117.3, 17.45])*1e3 # [kHz / mT]
 
 # Tungsten-183 nuclear magnetic moment
 gamma_W_ref = 1.77394e6 # MHz/T
@@ -241,11 +241,11 @@ def zeeman_hamiltonian_V2(system: SpinSystem, B, angle) -> Qobj:
 
     R = Get_nuc_to_elec_rotation(system.g_Er, B) # rotation makes the basis align with the electron effective magnetic field 
 
-    Beffz = np.linalg.norm(R @ (system.g_Er * B)) #effective field of the electron 
+    mu_effective = np.linalg.norm(R @ (mu_Er* B)) #effective field of the electron 
 
     B_rot = R @ B  # the field perceived by the nuclear spin which is different to the electron because of the anisotropic g tensor 
 
-    elec_term = -Beffz * mu_B * tensor(system.Sz, system.Id_I)
+    elec_term = -mu_effective * tensor(system.Sz, system.Id_I)
 
     nuc_term = -system.mu * sum(
         Bi * tensor(system.Id_S, Ii)
