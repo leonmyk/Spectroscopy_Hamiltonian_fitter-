@@ -37,9 +37,9 @@ def Plot_hyperFine_for_site(thetas,b0,r,mu,Aperp_to_plot=None,Apara_to_plot=None
         plot_crystal(ax=ax1,Crystal_atoms=Crystal_atoms,r = r)
 
         ax2 = fig.add_subplot(1, 2, 2)
-        ax2.plot(thetas*180/np.pi,A_perps*1e3, label = 'Aperp')
+        ax2.plot(thetas*180/np.pi,A_paras*1e3, label = 'A')
+        ax2.plot(thetas*180/np.pi,A_perps*1e3, label = 'B')
 
-        ax2.plot(thetas*180/np.pi,A_paras*1e3, label = 'Apara')
         ax2.set_xlabel('theta [deg]')
         ax2.set_ylabel('A [KHz]')
         ax2.legend()
@@ -47,8 +47,8 @@ def Plot_hyperFine_for_site(thetas,b0,r,mu,Aperp_to_plot=None,Apara_to_plot=None
     else :
 
         ax2 = plt.subplot(111)
-        ax2.plot(thetas*180/np.pi,A_paras*1e3, label = 'Apara')
-        ax2.plot(thetas*180/np.pi,A_perps*1e3, label = 'Aperp')
+        ax2.plot(thetas*180/np.pi,A_paras*1e3, label = 'A')
+        ax2.plot(thetas*180/np.pi,A_perps*1e3, label = 'B')
         ax2.set_xlabel('theta [deg]')
         ax2.set_ylabel('A [KHz]')
         ax2.legend()
@@ -63,6 +63,7 @@ def Plot_hyperFine_for_site(thetas,b0,r,mu,Aperp_to_plot=None,Apara_to_plot=None
 
 
 def get_HyperFine(r,theta,mu):
+    #returns the hyperfine tensor in the rotated frame
 
     g_Er = gamma_Er / mu_B
 
