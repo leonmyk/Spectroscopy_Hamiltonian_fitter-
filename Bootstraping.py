@@ -152,6 +152,64 @@ def Chunk_Data(signal,chunk_size = None,nb_chunks = None):
         
     return chunked_signals
 
+def rabi_decay_fit(t, f, t0, a, b, c, T):
+    return a * np.cos(2 * np.pi * f * (t - t0)) * np.exp(-t / T) + b * t + c
+
+def plot_elec_Rabi(
+    signal,
+    save_results: bool = True,
+):
+    
+
+    
+    data_click = signal["data_click"]
+    duration = signal["duration"]
+    excess = data_click.mean(0)
+
+    # Initial guess for the fit parameters t,f,t0,a,b,c,T
+    initial_guess = [3/(duration[-1]-duration[0]), 0, 0.06, (excess[-1]-excess[0])/(duration[-1]-duration[0]), min(excess), duration[-1]-duration[0]]
+
+    try:
+        # Perform curve fitting with initial guesses
+        params, params_covariance = curve_fit(rabi_decay_fit, duration, excess, p0=initial_guess)
+    except Exception as e:
+        print("Fit failed:", e)
+        params = initial_guess  # Use initial guess if fit fails
+    
+
+    fit = {
+        "params": params,
+        "params_covariance": params_covariance,
+        "guess": initial_guess,
+    }
+
+    
+    duration = np.array(signal["duration"])
+    duration_fit = np.linspace(duration[0], duration[-1], 1000)
+    data_click = signal["data_click"]
+    
+    params = fit["params"]
+    
+    # Create a figure with two subplots (2 rows, 1 column)
+    fig, ax1 = plt.subplots(1, 1, figsize=(8, 5))
+
+    # ---- First subplot: Original data and Lorentzian fit ----
+    ax1.plot(duration*1e-3, data_click.mean(0) , '-o', label='Data', color='blue')
+    ax1.plot(duration_fit*1e-3, rabi_decay_fit(duration_fit, *params))
+    
+    ax1.set_xlabel('Pulse duration (us)')
+    ax1.set_ylabel(r'$\langle C \rangle$')
+    ax1.set_title(
+        "electron Rabi"
+        + f"\n# Iterations: {signal['iteration']}"
+        + f'\nRabi freq: {params[0]*1e6:.1f} kHz\nPi pulse {params[1]:.0f} or {1/params[0]/2+params[1]:.0f} or {1/params[0]/2-abs(params[1]):.0f} ns' 
+    )
+    # ax1.axvline(params[1]*1e-3)
+    # Display the combined figure
+    plt.show()
+
+
+
 def plot(
     data_click,
     N_RO,
@@ -1135,181 +1193,4 @@ def plot_spectro(
         plt.tight_layout()
         plt.show()
         
-        
-def plotRabi(
-    self,
-    signal: dict,
-    fit: dict,
-    experiment_name="RamanRabi",
-    plot_fig=True,
-    threshold = 45,
-):
-    
-    # ---------------- Rabi analysis + plotting ----------------
-    clicks = signal["clicks"]
-    iteration = signal["iteration"]
-
-    # time axis (use your sweep vector directly)
-    t_list = signal['rabi_time_list']   # e.g., in ns/us/s — whatever you used
-    t_list = t_list - t_list.min()                         # start from 0 for fit/FFT robustness
-    delta_freq = signal["delta_freq"]
-    # populations from clicks
-    print(clicks.shape)
-    counts = clicks.sum(2) 
-    ps = []
-    for state in range(len(self.ro_freqs)):
-        ps.append(((counts[:, :, state]> threshold).mean(0)))
-    
-    sorted_idx = np.argsort([np.std(p) for p in ps])
-    p_fit  = ps[sorted_idx[-1]]
-    print(sorted_idx)
-
-
-    y = p_fit - np.mean(p_fit)
-    N = len(y)
-    win = np.hanning(N)
-    y_w = y * win
-
-    dt = np.median(np.diff(t_list))
-    freqs_fft = np.fft.rfftfreq(N, d=dt)
-    Y = np.fft.rfft(y_w)
-    mag = np.abs(Y)
-
-    if len(mag) > 1:
-        peak_idx = 1 + np.argmax(mag[1:])
-    else:
-        peak_idx = 0
-    f_guess_fft = float(freqs_fft[peak_idx])
-
-
-    a0  = 0.5 * (np.max(p_fit) - np.min(p_fit))
-    c0  = float(np.mean(p_fit))
-    b0  = 0.0
-    t00 = 0.0
-    T0  = 100
-    guess = [f_guess_fft, t00, a0, b0, c0, T0]
-
-    try:
-        est, std, fine, data_fit = fit_function(guess, rabi_decay_fit, t_list, p_fit)
-        f_rabi = float(est[0])
-        t0     = float(est[1])
-
-        phi = -2.0 * np.pi * f_rabi * t0
-        phi = (phi + np.pi) % (2.0 * np.pi) - np.pi
-
-        t_pi  = 1.0 / (2.0 * f_rabi)
-        t_pi2 = 1.0 / (4.0 * f_rabi)
-
-        def principal_time(target_angle):
-            k = np.ceil((2.0 * np.pi * f_rabi * (0.0 - t0) + target_angle) / (2.0 * np.pi)) - 1
-            t = t0 + (target_angle + 2.0 * np.pi * k) / (2.0 * np.pi * f_rabi)
-            if t < 0:
-                t += 1.0 / f_rabi
-            return float(t)
-        t_pi2_phase = principal_time(np.pi/2)
-        t_pi_phase  = principal_time(np.pi)
-        
-    except Exception as e:
-        print("Rabi fit failed, falling back to FFT freq guess. Error:", e)
-        est = guess
-        std = [np.nan] * len(guess)
-        fine = np.linspace(t_list.min(), t_list.max(), 4 * len(t_list))
-        data_fit = rabi_decay_fit(fine, *est)
-
-
-    fig, axs = plt.subplots(3, 2, figsize=(12, 9), tight_layout=True)
-
-    ax = axs[0, 0]
-    
-    for i,p in enumerate(ps):
-        ax.errorbar(
-            t_list, p, np.sqrt(p * (1 - p) / iteration),
-            linewidth=2, label=i,
-        )
-
-    ax.plot(fine, data_fit, "--", color="black", alpha=0.7, label="Rabi fit")
-
-    ax.set_xlabel("Time (ms)")
-    ax.set_ylabel("Population")
-    ax.set_ylim([-0.01, 1.01])
-    ax.legend()
-
-    # (2) Mean counts vs time
-    ax = axs[0, 1]
-    for i in range(len(self.ro_freqs)):
-        ax.plot(t_list, counts.mean(0)[:, i], label=i)
-    ax.set_title("Mean counts vs time", fontweight="bold")
-    ax.set_xlabel("Time (ms)")
-    ax.set_ylabel("Counts")
-    ax.legend()
-
-    # (3) FFT magnitude spectrum (new)
-    ax = axs[1, 0]
-    ax.plot(freqs_fft, mag, lw=2)
-    if np.isfinite(f_guess_fft):
-        ax.axvline(f_guess_fft, ls="--", color="k", alpha=0.7, label=f"FFT peak ~ {f_guess_fft:.6g}")
-    ax.set_title("FFT of population (windowed)", fontweight="bold")
-    ax.set_xlabel("Frequency (1/time)")
-    ax.set_ylabel("Magnitude (a.u.)")
-    ax.legend()
-
-    # (4) Histograms of counts
-    ax = axs[1, 1]
-    for i in range(2):
-        ax.hist(
-            counts[:, :, i].flatten(),
-            bins=np.arange(0, max(1, self.n_ro_nuclear // 2), 1),
-            alpha=0.5,
-            label=i,
-            density=True,
-        )
-    ax.set_title("Histogram of counts", fontweight="bold")
-    ax.set_xlabel("Counts")
-    ax.set_ylabel("Density")
-    ax.legend()
-    
-    plt.suptitle(
-        self.time_stamp + experiment_name
-        + "\n"
-        + rf"driving at {self.W_raman_freq*1e-3} KHz with amp1: {self.W_raman_relamp1} and amp2: {self.W_raman_relamp2}"
-        + "\n"
-        + (f"Rabi freq: {f_rabi:.6g} (kHz) | "
-        f"pi/2:  {t_pi2_phase:.6g}, "
-        f"pi: {t_pi_phase:.6g}")
-        + f"\nAverages: {iteration:.0f}",
-        fontweight="bold",
-    )
-    
-    #(4) Histograms of counts at max contrast
-    ax = axs[2, 0]
-    index_max_contrast_quad = [np.argmax(np.abs(ps[sorted_idx[0]] - ps[sorted_idx[1]])[:]) for i in range(1)]
-    
-    for i in range(1):
-        ax.hist(
-            counts[:, index_max_contrast_quad, i].flatten(),
-            bins=np.arange(0, max(1, self.n_ro_nuclear // 2), 1),
-            alpha=0.5,
-            label=i,
-            density=True,
-        )
-    # ax.set_title(f"Histogram of counts at max contrast (t={t_list[index_max_contrast_quad]:.2f} ms and {t_list[index_max_contrast_quad]:.2f} ms)", fontweight="bold")
-    ax.set_xlabel("Counts")
-    ax.set_ylabel("Density")
-    ax.legend()
-    
-    
-    # (5) Tracking of frequency shifts
-    ax = axs[2, 1]
-    if self.track:
-        ax.plot(delta_freq, label='delta_freq')
-    ax.set_xlabel('Iteration')
-    ax.set_ylabel('Delta frequency (Hz)')
-    ax.set_title('Tracking of frequency shifts during the experiment')
-
-    plt.show()
-
-    self.save(dataset=signal,
-        figure=fig,
-    )
-
-    return
+ 

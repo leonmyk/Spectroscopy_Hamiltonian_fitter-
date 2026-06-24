@@ -152,7 +152,10 @@ class Hamiltonian_Fitter():
         plt.tight_layout(rect=[0, 0, 1, 0.95])
         plt.show()
 
-    def Plot_Quadropole(self,title='Quadropole Tensor Elements Distribution'):
+    def Plot_Quadropole(self,title='Quadropole Tensor Elements Distribution',discard = 64*1000):
+
+
+
 
         fig,axs = plt.subplots(1,3, figsize=(8,4), tight_layout=True,sharey=True)
         
@@ -174,7 +177,8 @@ class Hamiltonian_Fitter():
             Q2[state.value] = []
             Q3[state.value] = []
 
-            for res in self.results[state.value]:
+            undiscarded_results = np.concatenate((self.discarded[state.value],self.results[state.value]), axis=0)
+            for res in undiscarded_results[discard:]:
 
                 if state == State.Full :
                     q_gr_f = get_full_q_tensor(res[2] - res[7]/2, res[3], res[4], res[5], res[6])
@@ -230,11 +234,11 @@ class Hamiltonian_Fitter():
  
         QZZ_ex_offsets = (QZZ[State.Excited.value]-np.mean(QZZ[State.Ground.value]))
         QZZ_gd_offsets = (QZZ[State.Ground.value]-np.mean(QZZ[State.Ground.value]))
-        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QZZ_gd_offsets*1e3,QZZ_ex_offsets*1e3,1,120)
+        (e_g,c_g,w1),(e_e,c_e,w2) = normalise_Histogram_Height(QZZ_gd_offsets*1e3,QZZ_ex_offsets*1e3,40,120)
         axs[2].bar(e_e, c_e, width=w2, align="edge", alpha=1, label="Excited")
         axs[2].bar(e_g, c_g, width=w1, align="edge", alpha=1, label="Ground")
         axs[2].set_xlabel(r'$Q_{ZZ} (Hz)$',fontsize = 14,fontweight = 'bold')
-        # axs[2].set_xlim(right=500,left=-500)
+        # axs[2].set_xlim(right=100,left=-100)
 
         
         axs[0].set_title(f"{values[2][1]} KHz \n (-{values[2][0]} Hz / +{values[2][2]} Hz)",fontsize = 10,fontweight = 'bold')
@@ -453,7 +457,7 @@ class Hamiltonian_Fitter():
     def plot_levels_and_residuals_separated(self, x,state:State,title=''):
 
         if state == State.Excited :
-            h: Qobj = hamiltonian(x,self.system)
+            h: Qobj = hamiltonian(x,self.system,angle = self.angle)
             ground_transitions, excited_transitions = get_transitions_separated(self.system,h.eigenenergies(),self.lamb_shift_meas)
             fit = excited_transitions
             error = (excited_transitions - self.meas[int(self.system.I*2):])
@@ -463,7 +467,7 @@ class Hamiltonian_Fitter():
 
 
         elif state == State.Ground :
-            h: Qobj = hamiltonian(x,self.system)
+            h: Qobj = hamiltonian(x,self.system,angle = self.angle)
             ground_transitions, excited_transitions = get_transitions_separated(self.system,h.eigenenergies())
             fit = ground_transitions
             error = (ground_transitions - self.meas[:int(self.system.I*2)])
@@ -519,12 +523,20 @@ class Hamiltonian_Fitter():
 
         plt.show()
 
-    def run_MCMC(self, state:State, guess = None,nwalkers=64, nsteps=10000, var = 0.01, discard = 10):
+    def run_MCMC(self, state:State, guess = None,nwalkers=64, nsteps=10000, var = 0.01, discard = 1000,fit_Aperp = False,fit_Angle = False):
         
         if guess is None:
             guess = self.best_x[state.value]
             
+        if fit_Aperp & fit_Angle:
+            guess = np.concatenate([guess,[self.angle,[self.meas_Aperp]]])
+
+        elif  fit_Aperp:
+            guess = np.concatenate([guess,[self.meas_Aperp]])
         
+        elif  fit_Angle:
+            guess = np.concatenate([guess,[self.angle]])
+            
         
         system = self.system
         meas = self.meas
@@ -538,8 +550,8 @@ class Hamiltonian_Fitter():
             meas=meas,
             std_meas=std_meas,
             lamb_shift_meas=lamb_shift_meas,
-            meas_Aperp = self.meas_Aperp,
-            angle = self.angle,
+            meas_Aperp = self.meas_Aperp if not fit_Aperp else None,
+            angle = self.angle if not fit_Angle else None,
             simu_A = self.simu_A
         )
 
@@ -552,10 +564,24 @@ class Hamiltonian_Fitter():
             sampler.run_mcmc(pos, nsteps, progress=True)
 
         samples = sampler.get_chain(discard=0, flat=True)
-        self.discarded[state.value] = samples[:discard]
         idx = sampler.get_log_prob()[discard:].argmax()
 
         self.best_x[state.value] = samples[idx]
+
+        if fit_Angle :
+            new_angle  = self.best_x[state.value][-1]
+            print("fitted best angle is ",new_angle*180/np.pi ," deg")
+            self.angle = new_angle
+            
+            samples = samples[:,:-1]
+            self.discarded[state.value] = samples[:discard]
+            idx = sampler.get_log_prob()[discard:].argmax()
+            self.best_x[state.value] = samples[idx]
+        
+        else : 
+            self.discarded[state.value] = samples[:discard]
+
+
         self.median_x[state.value] = np.median(samples[discard:], axis=0)
         self.results[state.value] = samples[discard:]
 
@@ -605,6 +631,7 @@ class Hamiltonian_Fitter():
         filename = f'mcmc_results_{State.Ground.value}' + self.id + '.json'
         try:
             with open(filename, "r", encoding="utf-8") as f:
+                print('loading ground')
                 data = json.load(f)
                 self.best_x[State.Ground.value] = np.array(data["best_x"])
                 self.median_x[State.Ground.value] = np.array(data["median_x"])
@@ -617,6 +644,7 @@ class Hamiltonian_Fitter():
         filename = f'mcmc_results_{State.Excited.value}' + self.id + '.json'
         try:
             with open(filename, "r", encoding="utf-8") as f:
+                print('loading excited')
                 data = json.load(f)
                 self.best_x[State.Excited.value] = np.array(data["best_x"])
                 self.median_x[State.Excited.value] = np.array(data["median_x"])
@@ -629,6 +657,7 @@ class Hamiltonian_Fitter():
         filename = f'mcmc_results_{State.Full.value}' + self.id + '.json'
         try:
             with open(filename, "r", encoding="utf-8") as f:
+                print('loading full')
                 data = json.load(f)
                 self.best_x[State.Full.value] = np.array(data["best_x"])
                 self.median_x[State.Full.value] = np.array(data["median_x"])
@@ -659,27 +688,60 @@ class Hamiltonian_Fitter():
     def Plot_corner(self,state:State,discard):
         
         undiscarded_results = np.concatenate((self.discarded[state.value],self.results[state.value]), axis=0)
-        fig = corner.corner(undiscarded_results[discard:, :], labels=self._labels(state), truths=self.median_x[state.value])
+        print("plotting corner plot for discarded result shape",undiscarded_results[discard:, :].shape)
+
+        ranges = []
+        for i in range(undiscarded_results[discard:, :].shape[1]):
+            col = undiscarded_results[discard:, i]
+            margin = (col.max() - col.min()) * 0.5
+            ranges.append((col.min() - margin, col.max() + margin))
+
+        fig = corner.corner(undiscarded_results[discard:, :], labels=self._labels(state), truths=self.best_x[state.value], range=ranges)
         plt.show()
+
+
 
 
 def get_log_likelihood_separated(x,system,state:State,meas,std_meas,lamb_shift_meas = None,meas_Aperp = None,angle = None,simu_A = None):
 
-
     if state == State.Excited :
-        h: Qobj = hamiltonian(x,system)
+
+        # if angle is None :
+        #     angle = x[-1]
+        #     x = x[:-1]
+
+        h: Qobj = hamiltonian(x,system,angle)
         ground_transitions, excited_transitions = get_transitions_separated(system,h.eigenenergies(),lamb_shift_meas)
         residuals = (excited_transitions - meas[int(system.I*2):]) / std_meas[int(system.I*2):] + log_prior(x) #excited
         
     elif state == State.Ground :
-        h: Qobj = hamiltonian(x,system)
+
+        # if angle is None :
+        #     angle = x[-1]
+        #     x = x[:-1]
+
+        h: Qobj = hamiltonian(x,system,angle)
         ground_transitions, excited_transitions = get_transitions_separated(system,h.eigenenergies())
         residuals = (ground_transitions - meas[:int(system.I*2)]) / std_meas[:int(system.I*2)] + log_prior(x)
         
     elif state == State.Full :
-        h: Qobj = Full_hamiltonian_V2(x,system,meas_Aperp,angle,simu_A)
-        print('lambshift get_log_likelihood_separated = ',lamb_shift_meas)
 
+        # if angle is None: ## case fitting the angle 
+
+        #     if meas_Aperp is None : # case fitting the angle and the Aperp
+        #         meas_Aperp = x[-1]
+        #         angle = x[-2]
+        #         x = x[:-2]
+
+        #     else: # case fitting only the angle 
+        #         angle = x[-1]
+        #         x = x[:-1]
+        
+        # elif meas_Aperp is None :  # case fitting only the Aperp 
+        #     meas_Aperp = x[-1]
+        #     x = x[:-1]
+
+        h: Qobj = Full_hamiltonian_V2(x,system,meas_Aperp,angle,simu_A)
         ground_transitions, excited_transitions = get_transitions_separated(system,h.eigenenergies(),lamb_shift_meas)
         meas_to_compare = np.concatenate((meas[:int(system.I*2)],meas[int(system.I*2):]))
         residuals = (np.concatenate((ground_transitions,excited_transitions)) - meas_to_compare) / std_meas #excited

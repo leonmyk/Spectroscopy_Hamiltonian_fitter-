@@ -86,10 +86,6 @@ def sdq_hamiltonian_param(system:SpinSystem,Dz) -> Qobj:
             h += q_tensor[i, j] * tensor(system.Sz, i1*i2)
     return h
 
-def hamiltonian(x: np.ndarray,system:SpinSystem) -> Qobj: 
-    Bz, D, E, Q2, Q3  = x
-    
-    return zeeman_hamiltonian(system,Bz) + quadrupole_hamiltonian_param(system,D, E, Q2, Q3) 
 
 def hamiltonian_Heca(x: np.ndarray,system:SpinSystem) -> Qobj: 
 
@@ -224,6 +220,16 @@ def Full_hamiltonian_V2(x: np.ndarray, system:SpinSystem ,meas_Aperp,angle,simu_
         hyperfine_hamiltonian_V2(system,B,A_para,meas_Aperp,simu_A) +\
         full_quadrupole_hamiltonian_param(system,D, S1, S2, delta, alpha) +\
         sdq_hamiltonian_param(system,Dz) #+\
+
+
+def hamiltonian(x: np.ndarray,system:SpinSystem,angle) -> Qobj: 
+    B0, D, E, Q2, Q3  = x
+
+    B = np.array([np.sin(angle),0,np.cos(angle)])*B0
+
+    
+    return zeeman_hamiltonian_V2(system,B,angle) + quadrupole_hamiltonian_param(system,D, E, Q2, Q3) 
+
 
 
 def Get_nuc_to_elec_rotation(elec_g_tensor,B):
